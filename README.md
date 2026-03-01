@@ -83,6 +83,22 @@
 - **TMDB API Key**: [TheMovieDB Settings](https://www.themoviedb.org/settings/api)
 - **Jellyfin API Key**: 控制台 -> 高级 -> API Keys
 
+## 开发计划 (Roadmap)
+
+### 已实现功能
+- [x] 适配 OpenList API 存储管理与交互式文件浏览
+- [x] 多源搜索：网盘搜索 (PanSou) + 磁力搜索 (Prowlarr) + 影视元数据 (TMDB)
+- [x] 离线下载：支持磁力/链接一键提交至 OpenList 离线下载
+- [x] 自动化链路：一键刷新 OpenList 缓存 + 触发 SmartStrm + 扫描 Jellyfin
+- [x] 配置管理：支持 YAML 配置文件与交互式修改配置项
+- [x] Docker 支持：支持 GHCR 自动构建与多架构部署方案
+
+### 计划实现功能
+- [ ] **文件管理增强**：支持在 Telegram 中直接删除 OpenList 里的文件/文件夹
+- [ ] **字幕搜索集成**：支持中文字幕搜索功能（拟集成多个字幕库 API）
+- [ ] **多用户权限管理**：更细粒度的管理员/成员使用权限控制
+- [ ] **通知系统**：离线下载完成后通过机器人自动推送通知
+
 ## 注意事项
 
 - **安全性**：切勿将包含真实 Token 的 `config.yaml` 提交到公开仓库（项目已预设 `.gitignore`）。
