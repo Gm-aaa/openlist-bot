@@ -1,0 +1,17 @@
+/my_bot.session
+logs/
+data/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+config.yaml
+*.log
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
