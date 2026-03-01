@@ -1,230 +1,90 @@
 # OpenList Bot
 
-基于 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 二次开发的 Telegram 机器人，适配 OpenList 并增加多种实用功能。
+基于 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 二次开发的 Telegram 机器人，专为 OpenList 优化并集成多种媒体自动化工具。
 
-## 项目背景
+## 项目亮点
 
-原项目 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 是针对 Alist 开发的 Telegram 管理 Bot。本项目在此基础上进行适配和扩展：
+本项目在原有的 Alist 管理功能基础上，针对 OpenList 进行了深度适配，并打通了从“搜索”到“下载”再到“媒体库刷新”的全链路自动化流程：
 
-- 适配 OpenList API（原项目仅支持 Alist）
-- 新增 TMDB 电影搜索功能
-- 新增 Prowlarr 种子搜索功能
-- 新增一键刷新文件流程（OpenList + SmartStrm + Jellyfin）
-- 代码重构优化，提高稳定性和可维护性
+- **深度适配 OpenList**：完美支持 OpenList API 存储管理与文件操作。
+- **多源搜索集成**：
+  - 🚀 **网盘搜索**：集成 PanSou，支持各大主流云盘。
+  - 🧲 **磁力搜索**：集成 Prowlarr，支持私有/公开索引器。
+  - 🎬 **影视元数据**：集成 TMDB，搜索电影/电视剧并获取标准译名。
+- **离线下载自动化**：支持通过 Telegram 直接提交磁力/链接到 OpenList 离线下载。
+- **一键刷新链路**：一键触发 `OpenList 缓存刷新` -> `SmartStrm 生成 STRM` -> `Jellyfin 扫描`。
+- **工程化优化**：采用 `loguru` 日志系统、`YAML` 配置管理，并优化了 `httpx` 连接池性能。
 
-## 功能概述
+## 功能命令
 
-### 🔍 搜索
-- `/s <关键词>` - 搜索网盘文件（支持按网盘类型筛选）
-- `/sb <关键词>` - 搜索种子/磁力链接（Prowlarr）
-- `/sm <关键词>` - 通过 TMDB 搜索电影/电视剧
+| 命令 | 说明 |
+|:---:|:---|
+| `/s <关键词>` | 搜索网盘文件（支持类型筛选） |
+| `/sb <关键词>` | 搜索种子/磁力链接 (Prowlarr) |
+| `/sm <关键词>` | 通过 TMDB 搜索影视信息 |
+| `/st` | 交互式浏览 OpenList 存储文件 |
+| `/od` | 提交离线下载任务 |
+| `/ods` | 查看离线下载进度状态 |
+| `/cf` | 交互式配置默认下载设置 |
+| `/fl` | 一键刷新文件链路 |
+| `/help` | 查看详细指令帮助 |
 
-### 📂 存储
-- `/st` - 浏览 OpenList 存储文件
+## 部署方式
 
-### 📥 下载
-- `/od` - 离线下载
-- `/ods` - 查看下载状态
-- `/cf` - 配置默认下载工具和路径
+### 方案一：Docker 部署（推荐）
 
-### 🔄 文件刷新
-- `/fl` - 一键刷新 OpenList 缓存 / 触发 SmartStrm / 扫描 Jellyfin
-
-## 部署
-
-### 环境要求
-
-- Python 3.11+
-- Telegram Bot Token
-- OpenList 服务
-- 网络代理（可选，用于访问外网）
-
-### 1. 克隆项目
+本项目支持 GitHub Packages (GHCR) 自动构建，你可以通过 Docker 快速启动：
 
 ```bash
-git clone https://github.com/your-repo/openlist-bot.git
-cd openlist-bot
+docker run -d \
+  --name openlist-bot \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -v $(pwd)/logs:/app/logs \
+  --restart always \
+  ghcr.io/gm-aaa/openlist-bot:latest
 ```
 
-### 2. 创建虚拟环境（推荐）
+### 方案二：手动部署
 
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate  # Windows
-```
+1. **环境要求**：Python 3.11+
+2. **克隆项目**：
+   ```bash
+   git clone https://github.com/Gm-aaa/openlist-bot.git
+   cd openlist-bot
+   ```
+3. **安装依赖**：
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **配置文件**：
+   ```bash
+   cp config.example.yaml config.yaml
+   # 编辑 config.yaml 填入你的 Token 和地址
+   ```
+5. **运行**：
+   ```bash
+   python bot.py
+   ```
 
-### 3. 安装依赖
+## 配置指南
 
-```bash
-pip install -r requirements.txt
-```
+详细配置项说明请参考 [config.example.yaml](./config.example.yaml)。
 
-### 4. 配置
-
-复制并编辑配置文件：
-
-```bash
-cp config.example.yaml config.yaml
-# 编辑 config.yaml
-```
-
-详细配置说明见下文。
-
-### 5. 运行
-
-```bash
-python bot.py
-```
-
-### 6. 设置开机自启（Linux）
-
-```bash
-cat > /etc/systemd/system/openlist-bot.service <<EOF
-[Unit]
-Description=OpenList-bot Service
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/path/to/openlist-bot
-ExecStart=/path/to/openlist-bot/venv/bin/python bot.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable openlist-bot
-systemctl start openlist-bot
-```
-
-## 配置文档
-
-### 完整配置示例
-
-```yaml
-# 日志级别: DEBUG, INFO, WARNING, ERROR
-log_level: INFO
-
-# OpenList 配置
-openlist:
-  openlist_host: "https://your-openlist.domain.com"  # OpenList 地址
-  openlist_token: "your-token"                        # OpenList Token
-  openlist_web: "https://your-openlist.domain.com"   # OpenList Web 地址
-  download_path: "/download"                           # 默认下载路径
-  download_tool: "qbittorrent"                        # 默认下载工具
-
-# 盘搜配置 (可选)
-pansou:
-  pansou_host: "https://pansou.domain.com"
-  pansou_token: "your-pansou-token"  # 登录后获取的 JWT Token
-
-# Prowlarr 配置 (可选，用于种子搜索)
-prowlarr:
-  prowlarr_host: "https://prowlarr.domain.com"
-  prowlarr_api_key: "your-api-key"
-  torrent_cache_max: 10
-
-# TMDB 配置 (可选，用于电影搜索)
-tmdb:
-  tmdb_api_key: "your-tmdb-api-key"
-
-# SmartStrm 配置 (可选，用于 STRM 生成)
-smartstrm:
-  smartstrm_url: "http://192.168.1.100:8024/webhook/your-webhook-id"
-  task_name: "电影"
-
-# Jellyfin 配置 (可选，用于媒体库扫描)
-jellyfin:
-  jellyfin_host: "http://192.168.1.100:8096"
-  jellyfin_api_key: "your-jellyfin-api-key"
-
-# 代理配置 (可选)
-proxy:
-  enable: true
-  scheme: socks5  # http, socks5
-  hostname: 127.0.0.1
-  port: 10808
-
-# 用户配置
-user:
-  admin: 123456789  # 管理员 Telegram ID
-  bot_token: "your-bot-token"
-  member: []       # 允许使用的用户ID，留空则所有人可用
-```
-
-### 配置说明
-
-| 配置项 | 必填 | 说明 |
-|--------|------|------|
-| `log_level` | 否 | 日志级别，默认 INFO |
-| `openlist.openlist_host` | ✅ | OpenList 服务地址 |
-| `openlist.openlist_token` | ✅ | OpenList Token |
-| `openlist.download_path` | 否 | 默认下载路径 |
-| `openlist.download_tool` | 否 | 默认下载工具 |
-| `pansou.*` | 否 | 盘搜功能配置 |
-| `prowlarr.*` | 否 | 种子搜索功能配置 |
-| `tmdb.tmdb_api_key` | 否 | TMDB API Key，从 themoviedb.org 获取 |
-| `smartstrm.*` | 否 | SmartStrm 配置，用于 STRM 文件生成 |
-| `jellyfin.*` | 否 | Jellyfin 配置，用于媒体库扫描 |
-| `proxy.*` | 否 | SOCKS5/HTTP 代理配置 |
-| `user.admin` | ✅ | 管理员 Telegram ID |
-| `user.bot_token` | ✅ | Telegram Bot Token |
-
-### 获取配置
-
-1. **Telegram Bot Token**: @BotFather
-2. **Telegram User ID**: @getuseridbot
-3. **OpenList Token**: 登录 OpenList → 设置 → 概览 → API
-4. **TMDB API Key**: https://www.themoviedb.org/settings/api
-5. **Jellyfin API Key**: 控制台 → 高级 → API Keys → 添加 API Key
-
-## 使用说明
-
-### 搜索功能
-
-```
-/s 电影名称        # 搜索网盘文件
-/sb 电影名称       # 搜索种子
-/sm 电影名称       # 通过 TMDB 搜索电影
-```
-
-### 下载功能
-
-```
-/od              # 开始离线下载
-/ods             # 查看下载状态
-/cf              # 配置默认下载工具和路径
-```
-
-### 刷新功能
-
-```
-/fl              # 刷新文件（显示操作选项）
-```
-
-点击按钮可选择：
-- 🚀 一键刷新全部（需要全部配置）
-- 🔄 刷新 OpenList 缓存
-- 📄 触发 SmartStrm
-- 📺 扫描 Jellyfin
-
-## 依赖
-
-- python-telegram-bot~=20.8
-- httpx~=0.26.0
-- loguru~=0.7.2
-- PyYAML~=6.0.1
-- APScheduler~=3.10.1
-- 其他见 requirements.txt
+### 关键配置获取路径：
+- **Telegram Bot Token**: [@BotFather](https://t.me/BotFather)
+- **OpenList Token**: 登录 OpenList -> 设置 -> 概览 -> API
+- **TMDB API Key**: [TheMovieDB Settings](https://www.themoviedb.org/settings/api)
+- **Jellyfin API Key**: 控制台 -> 高级 -> API Keys
 
 ## 注意事项
 
-1. 确保 OpenList 服务可访问
-2. 代理配置用于访问外网服务（TMDB、Prowlarr 等）
-3. 敏感配置请勿提交到公开仓库
+- **安全性**：切勿将包含真实 Token 的 `config.yaml` 提交到公开仓库（项目已预设 `.gitignore`）。
+- **代理**：如果你的服务器无法直接访问 Telegram API，请在 `config.yaml` 中配置 `proxy`。
 
+## 致谢
 
+感谢 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 提供的灵感和基础架构。
+
+## 开源协议
+
+MIT License
