@@ -29,6 +29,7 @@ class OpenListAPI:
             "Content-Type": "application/json",
         }
         self._update_auth_header()
+        self.client = httpx.AsyncClient(headers=self.headers, timeout=10)
 
     def _update_auth_header(self):
         if self._jwt_token:
@@ -69,19 +70,18 @@ class OpenListAPI:
         req_headers = {**self.headers, **(headers or {})}
         req_headers["Authorization"] = self._get_auth_token()
 
-        async with httpx.AsyncClient() as client:
-            if method == "GET":
-                response = await client.get(
-                    url, headers=req_headers, params=params, timeout=timeout
-                )
-            elif method == "POST":
-                response = await client.post(
-                    url, headers=req_headers, json=json, timeout=timeout
-                )
-            elif method == "PUT":
-                response = await client.put(
-                    url, headers=req_headers, data=data, timeout=timeout
-                )
+        if method == "GET":
+            response = await self.client.get(
+                url, headers=req_headers, params=params, timeout=timeout
+            )
+        elif method == "POST":
+            response = await self.client.post(
+                url, headers=req_headers, json=json, timeout=timeout
+            )
+        elif method == "PUT":
+            response = await self.client.put(
+                url, headers=req_headers, data=data, timeout=timeout
+            )
         
         response.raise_for_status()
         result = response.json()

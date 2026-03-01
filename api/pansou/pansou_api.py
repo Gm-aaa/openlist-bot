@@ -29,6 +29,7 @@ class PanSouAPI:
         }
         if self._token:
             self.headers["Authorization"] = f"Bearer {self._token}"
+        self.client = httpx.AsyncClient(headers=self.headers, timeout=30)
 
     async def search(self, keyword: str, page: int = 1) -> list[PanSouResult]:
         url = urljoin(self.host, "/api/search")
@@ -40,8 +41,7 @@ class PanSouAPI:
         
         logger.info(f"PanSou 搜索: {keyword}, page: {page}")
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=body, headers=self.headers, timeout=30)
+        response = await self.client.post(url, json=body)
         
         logger.info(f"PanSou 搜索响应: {response.status_code}")
         

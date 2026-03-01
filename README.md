@@ -33,16 +33,23 @@
 
 ### 方案一：Docker 部署（推荐）
 
-本项目支持 GitHub Packages (GHCR) 自动构建，你可以通过 Docker 快速启动：
+本项目支持 GitHub Packages (GHCR) 自动构建。部署前需要先获取并修改配置文件：
 
-```bash
-docker run -d \
-  --name openlist-bot \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -v $(pwd)/logs:/app/logs \
-  --restart always \
-  ghcr.io/gm-aaa/openlist-bot:latest
-```
+1. **下载示例配置文件**：
+   ```bash
+   wget https://raw.githubusercontent.com/Gm-aaa/openlist-bot/master/config.example.yaml -O config.yaml
+   ```
+2. **编辑 `config.yaml`**：
+   根据文件内的注释填入你的 Token 和服务器地址。
+3. **启动容器**：
+   ```bash
+   docker run -d \
+     --name openlist-bot \
+     -v $(pwd)/config.yaml:/app/config.yaml \
+     -v $(pwd)/logs:/app/logs \
+     --restart always \
+     ghcr.io/gm-aaa/openlist-bot:latest
+   ```
 
 ### 方案二：手动部署
 

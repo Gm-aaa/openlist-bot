@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any
+import sys
+import os
 
 import yaml
 
@@ -21,8 +23,20 @@ class BaseConfig:
         self._key_map = {}
 
     def load_config(self):
+        if not os.path.exists(self.cfg_path):
+            print(f"❌ 错误: 找不到配置文件 '{self.cfg_path}'")
+            print(f"💡 请参考项目中的 'config.example.yaml' 创建该文件。")
+            sys.exit(1)
+            
         with open(self.cfg_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            try:
+                cfg = yaml.safe_load(f)
+                if not cfg:
+                    return {}
+                return cfg
+            except Exception as e:
+                print(f"❌ 错误: 配置文件格式不正确: {e}")
+                sys.exit(1)
 
     def save_config(self):
         with open(self.cfg_path, "w", encoding="utf-8") as f:
@@ -59,7 +73,7 @@ class BotConfig(Config):
     def __init__(self, cfg_path):
         super().__init__(cfg_path)
         self.admin: int = self.retrieve("user.admin")
-        self.member: list = self.retrieve("user.member")
+        self.member: list = self.retrieve("user.member", [])
         self.bot_token = self.retrieve("user.bot_token")
 
         self.openlist_host = self.retrieve("openlist.openlist_host")
@@ -81,7 +95,7 @@ class BotConfig(Config):
         self.jellyfin_host = self.retrieve("jellyfin.jellyfin_host", "")
         self.jellyfin_api_key = self.retrieve("jellyfin.jellyfin_api_key", "")
         
-        self.proxy_enable = self.retrieve("proxy.enable")
+        self.proxy_enable = self.retrieve("proxy.enable", False)
         self.hostname = self.retrieve("proxy.hostname")
         self.port = self.retrieve("proxy.port")
         self.scheme = self.retrieve("proxy.scheme")

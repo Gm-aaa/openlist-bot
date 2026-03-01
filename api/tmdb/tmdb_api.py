@@ -24,6 +24,7 @@ class TMDbAPI:
         self.api_key = api_key
         self.base_url = "https://api.themoviedb.org/3"
         self.image_base = "https://image.tmdb.org/t/p/w200"
+        self.client = httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=10)
     
     async def search(self, query: str, language: str = "zh-CN") -> list[TMDbResult]:
         """搜索电影/电视剧"""
@@ -40,9 +41,8 @@ class TMDbAPI:
         }
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, params=params, timeout=10)
-                data = response.json()
+            response = await self.client.get(url, params=params)
+            data = response.json()
             
             results = []
             if data.get("results"):

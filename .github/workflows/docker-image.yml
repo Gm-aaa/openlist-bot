@@ -1,26 +1,51 @@
-name: Docker Image CI
+name: Build and Push Docker Image
 
 on:
   push:
-    branches: ["master"]
-    paths-ignore:
-      - "README.md"
+    branches: [ "master" ]
+    tags: [ 'v*' ]
   pull_request:
-    branches: ["master"]
+    branches: [ "master" ]
+
+env:
+  REGISTRY: ghcr.io
+  # 自动获取 Gm-aaa/openlist-bot
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: docker/login-action@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.ALIST_GITHUB_TOKEN }}
+    permissions:
+      contents: read
+      packages: write
 
-      - name: Build the  Docker image
-        run:
-          |
-          docker build . --file Dockerfile --tag ghcr.io/z-mio/alist-bot:latest 
-          docker push ghcr.io/z-mio/alist-bot:latest 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=tag
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ id.meta.outputs.tags }}
+          labels: ${{ id.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

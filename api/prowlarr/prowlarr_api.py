@@ -42,6 +42,7 @@ class ProwlarrAPI:
             "Content-Type": "application/json",
             "X-Api-Key": api_key,
         }
+        self.client = httpx.AsyncClient(headers=self.headers, timeout=30)
 
     async def search(
         self,
@@ -67,8 +68,7 @@ class ProwlarrAPI:
         
         logger.info(f"Prowlarr 搜索: {query}")
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, headers=self.headers, timeout=30)
+        response = await self.client.get(url, params=params)
         
         logger.info(f"Prowlarr 搜索响应: {response.status_code}")
         
@@ -112,10 +112,7 @@ class ProwlarrAPI:
             raise Exception("Prowlarr 未配置")
         
         url = urljoin(self.host, "/api/v1/indexer")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self.headers, timeout=30)
-        
+        response = await self.client.get(url)
         response.raise_for_status()
         return response.json()
     
@@ -124,10 +121,7 @@ class ProwlarrAPI:
             raise Exception("Prowlarr 未配置")
         
         url = urljoin(self.host, "/api/v1/indexer/categories")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=self.headers, timeout=30)
-        
+        response = await self.client.get(url)
         response.raise_for_status()
         return response.json()
 
