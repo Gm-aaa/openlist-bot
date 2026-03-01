@@ -66,7 +66,7 @@ pip install -r requirements.txt
 复制并编辑配置文件：
 
 ```bash
-cp config.yaml config.yaml.bak
+cp config.example.yaml config.yaml
 # 编辑 config.yaml
 ```
 
@@ -120,8 +120,7 @@ openlist:
 # 盘搜配置 (可选)
 pansou:
   pansou_host: "https://pansou.domain.com"
-  pansou_username: "username"
-  pansou_password: "password"
+  pansou_token: "your-pansou-token"  # 登录后获取的 JWT Token
 
 # Prowlarr 配置 (可选，用于种子搜索)
 prowlarr:

@@ -1,0 +1,50 @@
+# OpenList Bot 配置文件
+# 复制此文件为 config.yaml 并修改配置值
+
+log_level: INFO
+
+# 用户配置
+user:
+  admin: 1234567890
+  bot_token: "your_bot_token_here"
+  member: []
+
+# OpenList 配置
+openlist:
+  openlist_host: "https://openlist.your-domain.com"
+  openlist_token: "your_openlist_token"
+  openlist_web: "https://openlist.your-domain.com"
+  download_path: /115/girl
+  download_tool: 115 Cloud
+
+# 盘搜配置（可选）
+pansou:
+  pansou_host: "https://pansou.your-domain.com"
+  pansou_token: "your_pansou_token"
+
+# Prowlarr 配置（可选，用于种子搜索）
+prowlarr:
+  prowlarr_host: "https://prowlarr.your-domain.com"
+  prowlarr_api_key: "your_prowlarr_api_key"
+  torrent_cache_max: 10
+
+# TMDB 配置（可选，用于电影搜索）
+tmdb:
+  tmdb_api_key: "your_tmdb_api_key"
+
+# SmartStrm 配置（可选，用于 STRM 生成）
+smartstrm:
+  smartstrm_url: "https://strm.your-domain.com/webhook/xxx"
+  task_name: "115"
+
+# Jellyfin 配置（可选，用于媒体库扫描）
+jellyfin:
+  jellyfin_host: "https://jellyfin.your-domain.com"
+  jellyfin_api_key: "your_jellyfin_api_key"
+
+# 代理配置（可选）
+proxy:
+  enable: false
+  hostname: 127.0.0.1
+  port: 10808
+  scheme: http
