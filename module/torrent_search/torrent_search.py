@@ -19,6 +19,7 @@ from api.openlist.openlist_api import openlist
 PAGE: dict[str, "TorrentPage"] = {}
 RESULT_INDEXER: dict[str, ProwlarrResult] = {}
 INDEXERS: dict[int, str] = {}
+KEYWORD_CACHE: dict[int, str] = {}
 
 # 下载信息缓存（用于路径/工具选择）
 DOWNLOAD_INFO: dict[int, dict] = {}
@@ -221,25 +222,28 @@ async def sb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("请加上关键词，例：`/sb 电影名称`")
     
     await load_indexers()
-    
+
     if not INDEXERS:
         return await update.message.reply_text("无法获取索引器列表，请检查 Prowlarr 配置")
-    
+
+    # 将关键词存入缓存，callback_data 只携带 chat_id，避免超过 64 字节限制
+    KEYWORD_CACHE[chat.id] = keyword
+
     keyboard = []
     row = []
     for idx_id, idx_name in INDEXERS.items():
         row.append(InlineKeyboardButton(
             idx_name[:12],
-            callback_data=f"sb_indexer_{idx_id}_{keyword}"
+            callback_data=f"sb_indexer_{idx_id}_{chat.id}"
         ))
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
-    
-    keyboard.append([InlineKeyboardButton("🔍 全部索引器", callback_data=f"sb_indexer_all_{keyword}")])
-    
+
+    keyboard.append([InlineKeyboardButton("🔍 全部索引器", callback_data=f"sb_indexer_all_{chat.id}")])
+
     await update.message.reply_text(
         f"🔍 选择要使用的索引器:\n关键词: {keyword}",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -271,7 +275,9 @@ async def search_with_indexer(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not results:
         return await original_msg.edit_text("未搜索到结果")
     
-    RESULT_INDEXER.clear()
+    keys_to_delete = [k for k in RESULT_INDEXER if k.startswith(f"{cmid}_")]
+    for k in keys_to_delete:
+        del RESULT_INDEXER[k]
     for i, r in enumerate(results):
         RESULT_INDEXER[f"{cmid}_{i}"] = r
     
@@ -297,10 +303,21 @@ async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.replace("sb_indexer_", "").split("_", 1)
         if len(parts) != 2:
             return
-        
+
         indexer_part = parts[0]
-        keyword = parts[1]
-        
+        try:
+            source_chat_id = int(parts[1])
+        except ValueError:
+            return
+
+        keyword = KEYWORD_CACHE.get(source_chat_id, "")
+        if not keyword:
+            try:
+                await query.answer("会话已过期，请重新搜索", show_alert=True)
+            except Exception:
+                pass
+            return
+
         if indexer_part == "all":
             indexer_id = -1
         else:
@@ -308,7 +325,7 @@ async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 indexer_id = int(indexer_part)
             except ValueError:
                 return
-        
+
         await search_with_indexer(update, context, indexer_id, keyword, query.message.text)
         return
     
