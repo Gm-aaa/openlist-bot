@@ -117,13 +117,16 @@ async def sm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         chat_id = update.effective_chat.id
-        RESULT_TMDB.clear()
+        cmid = f"{chat_id}|{search_msg.message_id}"
+        keys_to_delete = [k for k in RESULT_TMDB if k.startswith(f"{cmid}_")]
+        for k in keys_to_delete:
+            del RESULT_TMDB[k]
         for i, r in enumerate(results):
-            RESULT_TMDB[f"{chat_id}_{i}"] = r
-        
+            RESULT_TMDB[f"{cmid}_{i}"] = r
+
         page = TMDbPage(results, keyword)
-        PAGE[chat_id] = page
-        
+        PAGE[cmid] = page
+
         text, buttons = page.now_page_text()
         await search_msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
     except Exception as e:
@@ -143,15 +146,16 @@ async def tmdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     msg = query.message
     chat_id = msg.chat.id
-    
-    page = PAGE.get(chat_id)
+    cmid = f"{chat_id}|{msg.message_id}"
+
+    page = PAGE.get(cmid)
     if not page:
         try:
             await query.answer("会话已过期，请重新搜索", show_alert=True)
         except Exception:
             pass
         return
-    
+
     if data == "tmdb_next":
         page.next_page()
         text, buttons = page.now_page_text()
@@ -167,8 +171,8 @@ async def tmdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             index = int(data.split("_")[-1])
         except ValueError:
             return
-        
-        result_key = f"{chat_id}_{index}"
+
+        result_key = f"{cmid}_{index}"
         result = RESULT_TMDB.get(result_key)
         if not result:
             try:

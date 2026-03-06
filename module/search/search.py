@@ -164,13 +164,13 @@ async def s_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not results:
         return await msg.edit_text("未搜索到文件，换个关键词试试吧")
 
-    text, button = await build_result(results, update, k)
+    text, button = await build_result(results, msg, k)
     await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(button), disable_web_page_preview=True)
 
 
-async def build_result(content: list[PanSouResult], update: Update, keyword: str):
-    chat_id = update.effective_chat.id
-    message_id = update.message.id + 1
+async def build_result(content: list[PanSouResult], msg, keyword: str):
+    chat_id = msg.chat.id
+    message_id = msg.message_id
     cmid = f"{chat_id}|{message_id}"
     
     page = Page(content, keyword)
@@ -195,6 +195,10 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     page = PAGE.get(cmid)
     
     if not page:
+        try:
+            await query.answer("搜索结果已过期，请重新搜索", show_alert=True)
+        except Exception:
+            pass
         return
     
     if data == "search_next_page":
