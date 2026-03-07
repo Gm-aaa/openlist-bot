@@ -17,6 +17,44 @@ from loguru import logger
 
 DOWNLOAD_CACHE = {}
 STEP_SELECTING_TOOL = "tool"
+
+# ─── 下载完成通知 ──────────────────────────────────────────────────────────────
+PREV_UNDONE_IDS: set[str] = set()
+
+
+async def check_download_completion(context) -> None:
+    """定时检查离线下载任务，完成时主动推送通知（JobQueue 回调）"""
+    global PREV_UNDONE_IDS
+    try:
+        undone = await openlist.get_offline_download_undone_task()
+        done = await openlist.get_offline_download_done_task()
+
+        current_undone_ids: set[str] = set()
+        if undone.data and isinstance(undone.data, list):
+            current_undone_ids = {str(t.get("id", "")) for t in undone.data if t.get("id")}
+
+        done_map: dict[str, dict] = {}
+        if done.data and isinstance(done.data, list):
+            done_map = {str(t.get("id", "")): t for t in done.data if t.get("id")}
+
+        newly_done = PREV_UNDONE_IDS & done_map.keys()
+        for task_id in newly_done:
+            task = done_map[task_id]
+            name, path = extract_file_info(task.get("name", ""))
+            size = format_size(task.get("total_bytes", 0))
+            err = task.get("error", "")
+            if err:
+                text = f"❌ 下载失败\n\n文件: {name}\n路径: {path}\n错误: {err}"
+            else:
+                text = f"✅ 下载完成\n\n文件: {name}\n大小: {size}\n路径: {path}"
+            try:
+                await context.bot.send_message(chat_id=bot_cfg.admin, text=text)
+            except Exception as e:
+                logger.error(f"发送下载通知失败: {e}")
+
+        PREV_UNDONE_IDS = current_undone_ids
+    except Exception as e:
+        logger.error(f"check_download_completion 失败: {e}")
 STEP_BROWSING_PATH = "browse_path"
 STEP_ENTERING_URL = "url"
 STEP_CONFIRMING = "confirm"

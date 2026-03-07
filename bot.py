@@ -54,6 +54,9 @@ else:
 
 
 async def post_init(application: Application):
+    from module.offline_download.offline_download import check_download_completion
+    application.job_queue.run_repeating(check_download_completion, interval=30, first=60)
+    logger.info("已注册离线下载完成通知任务（每 30 秒轮询）")
     admin_cmd = [
         BotCommand("s", "搜索网盘文件"),
         BotCommand("sb", "搜索种子"),
