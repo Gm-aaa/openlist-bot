@@ -290,15 +290,15 @@ async def search_with_indexer(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    
+
     try:
         await query.answer()
     except Exception:
         pass
-    
+
     data = query.data
     msg = query.message
-    
+
     if data.startswith("sb_indexer_"):
         parts = data.replace("sb_indexer_", "").split("_", 1)
         if len(parts) != 2:
@@ -328,132 +328,7 @@ async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await search_with_indexer(update, context, indexer_id, keyword, query.message.text)
         return
-    
-    cmid = f"{msg.chat.id}|{msg.message_id}"
-    page = PAGE.get(cmid)
-    
-    if not page:
-        try:
-            await query.answer("搜索结果已过期，请重新搜索", show_alert=True)
-        except Exception:
-            pass
-        return
-    
-    if data == "torrent_next":
-        page.next_page()
-        text, buttons = page.now_page_text()
-        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
-        return
-    elif data == "torrent_previous":
-        page.previous_page()
-        text, buttons = page.now_page_text()
-        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
-        return
-    elif data.startswith("torrent_magnet_"):
-        try:
-            index = int(data.split("_")[-1])
-        except ValueError:
-            return
-        result = RESULT_INDEXER.get(f"{cmid}_{index}")
-        if not result:
-            return
-        
-        try:
-            await query.answer("🔄 转换中...", show_alert=False)
-        except Exception:
-            pass
-        
-        cache = TorrentCache(bot_cfg.torrent_cache_max or 10)
-        
-        # 检查是否已有有效的磁力链接
-        magnet = None
-        if result.magnet_url and result.magnet_url.startswith("magnet:"):
-            magnet = result.magnet_url
-        elif result.torrent_url:
-            magnet = await cache.get_magnet(result.torrent_url)
-        else:
-            try:
-                await query.answer("无可用链接", show_alert=True)
-            except Exception:
-                pass
-            return
-        
-        if magnet:
-            await query.message.reply_text(
-                f"🧲 磁力链接:\n\n`{magnet}`\n\n👆 点击复制",
-                parse_mode="Markdown"
-            )
-        else:
-            try:
-                await query.answer("转换失败", show_alert=True)
-            except Exception:
-                pass
-        return
-    elif data.startswith("torrent_add_"):
-        try:
-            index = int(data.split("_")[-1])
-        except ValueError:
-            return
-        result = RESULT_INDEXER.get(f"{cmid}_{index}")
-        if not result:
-            try:
-                await query.answer("搜索结果已过期，请重新搜索", show_alert=True)
-            except Exception:
-                pass
-            return
-        
-        try:
-            await query.answer("🔄 获取下载信息...", show_alert=False)
-        except Exception:
-            pass
-        
-        # 获取下载工具和路径 - 使用刷新后的配置
-        try:
-            from config.config import reload_od_cfg
-            cfg = reload_od_cfg()
-            path = cfg.download_path if cfg and cfg.download_path else "/"
-            tool = cfg.download_tool if cfg and cfg.download_tool else "qbittorrent"
-        except Exception:
-            path = "/"
-            tool = "qbittorrent"
-        
-        # 尝试获取有效的磁力链接
-        download_url = None
-        if result.magnet_url and result.magnet_url.startswith("magnet:"):
-            download_url = result.magnet_url
-        elif result.torrent_url:
-            cache = TorrentCache(bot_cfg.torrent_cache_max or 10)
-            magnet = await cache.get_magnet(result.torrent_url)
-            if magnet:
-                download_url = magnet
-        
-        if not download_url:
-            try:
-                await query.answer("无可用链接", show_alert=True)
-            except Exception:
-                pass
-            return
-        
-        chat_id = query.message.chat.id
-        
-        # 显示确认按钮，包含工具和路径信息
-        file_name = result.title[:30] + "..." if len(result.title) > 30 else result.title
-        
-        # 保存下载信息到缓存
-        DOWNLOAD_INFO[chat_id] = {
-            "result": result,
-            "index": index,
-            "cmid": cmid,
-            "path": path,
-            "tool": tool,
-            "url": download_url,
-            "file_name": file_name
-        }
-        
-        text, keyboard = await build_download_confirm_message(chat_id, DOWNLOAD_INFO[chat_id])
-        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        return
-    
+
     # 选择下载路径 - 显示存储列表
     if data == "sb_path_select":
         chat_id = msg.chat.id
@@ -622,20 +497,141 @@ async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             return
-        
+
         try:
             await query.answer("🔄 准备下载...", show_alert=False)
         except Exception:
             pass
-        
+
         info = DOWNLOAD_INFO[chat_id]
         download_url = info.get("url")
         path = info.get("path", "/")
         tool = info.get("tool", "qbittorrent")
-        
+
         # 调用 /od 的确认流程
         from module.offline_download.offline_download import start_download_with_url
         await start_download_with_url(query.message, tool, path, download_url)
+        return
+
+    # 以下需要搜索结果页（种子搜索翻页 / 磁力 / 添加下载）
+    cmid = f"{msg.chat.id}|{msg.message_id}"
+    page = PAGE.get(cmid)
+
+    if not page:
+        try:
+            await query.answer("搜索结果已过期，请重新搜索", show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if data == "torrent_next":
+        page.next_page()
+        text, buttons = page.now_page_text()
+        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    elif data == "torrent_previous":
+        page.previous_page()
+        text, buttons = page.now_page_text()
+        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    elif data.startswith("torrent_magnet_"):
+        try:
+            index = int(data.split("_")[-1])
+        except ValueError:
+            return
+        result = RESULT_INDEXER.get(f"{cmid}_{index}")
+        if not result:
+            return
+
+        try:
+            await query.answer("🔄 转换中...", show_alert=False)
+        except Exception:
+            pass
+
+        cache = TorrentCache(bot_cfg.torrent_cache_max or 10)
+
+        magnet = None
+        if result.magnet_url and result.magnet_url.startswith("magnet:"):
+            magnet = result.magnet_url
+        elif result.torrent_url:
+            magnet = await cache.get_magnet(result.torrent_url)
+        else:
+            try:
+                await query.answer("无可用链接", show_alert=True)
+            except Exception:
+                pass
+            return
+
+        if magnet:
+            await query.message.reply_text(
+                f"🧲 磁力链接:\n\n`{magnet}`\n\n👆 点击复制",
+                parse_mode="Markdown"
+            )
+        else:
+            try:
+                await query.answer("转换失败", show_alert=True)
+            except Exception:
+                pass
+        return
+    elif data.startswith("torrent_add_"):
+        try:
+            index = int(data.split("_")[-1])
+        except ValueError:
+            return
+        result = RESULT_INDEXER.get(f"{cmid}_{index}")
+        if not result:
+            try:
+                await query.answer("搜索结果已过期，请重新搜索", show_alert=True)
+            except Exception:
+                pass
+            return
+
+        try:
+            await query.answer("🔄 获取下载信息...", show_alert=False)
+        except Exception:
+            pass
+
+        try:
+            from config.config import reload_od_cfg
+            cfg = reload_od_cfg()
+            path = cfg.download_path if cfg and cfg.download_path else "/"
+            tool = cfg.download_tool if cfg and cfg.download_tool else "qbittorrent"
+        except Exception:
+            path = "/"
+            tool = "qbittorrent"
+
+        download_url = None
+        if result.magnet_url and result.magnet_url.startswith("magnet:"):
+            download_url = result.magnet_url
+        elif result.torrent_url:
+            cache = TorrentCache(bot_cfg.torrent_cache_max or 10)
+            magnet = await cache.get_magnet(result.torrent_url)
+            if magnet:
+                download_url = magnet
+
+        if not download_url:
+            try:
+                await query.answer("无可用链接", show_alert=True)
+            except Exception:
+                pass
+            return
+
+        chat_id = query.message.chat.id
+        file_name = result.title[:30] + "..." if len(result.title) > 30 else result.title
+
+        DOWNLOAD_INFO[chat_id] = {
+            "result": result,
+            "index": index,
+            "cmid": cmid,
+            "path": path,
+            "tool": tool,
+            "url": download_url,
+            "file_name": file_name
+        }
+
+        text, keyboard = await build_download_confirm_message(chat_id, DOWNLOAD_INFO[chat_id])
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        return
 
 
 def register_handlers(app: Application):
