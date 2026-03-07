@@ -342,9 +342,13 @@ async def torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "torrent_next":
         page.next_page()
         text, buttons = page.now_page_text()
+        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
     elif data == "torrent_previous":
         page.previous_page()
         text, buttons = page.now_page_text()
+        await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
+        return
     elif data.startswith("torrent_magnet_"):
         try:
             index = int(data.split("_")[-1])
