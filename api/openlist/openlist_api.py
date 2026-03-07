@@ -264,6 +264,29 @@ class OpenListAPI:
         url = "/api/admin/task/offline_download/clear_done"
         return await self._request("POST", url)
 
+    async def fs_remove(self, dir_path: str, names: list[str]) -> OpenListAPIResponse:
+        """删除文件/文件夹"""
+        await self._ensure_token()
+        body = {"dir": dir_path, "names": names}
+        return await self._request("POST", "/api/fs/remove", json=body)
+
+    async def fs_mkdir(self, path: str) -> OpenListAPIResponse:
+        """创建文件夹"""
+        await self._ensure_token()
+        body = {"path": path}
+        return await self._request("POST", "/api/fs/mkdir", json=body)
+
+    async def fs_put_bytes(self, file_data: bytes, remote_path: str, file_name: str) -> OpenListAPIResponse:
+        """上传文件（bytes数据）"""
+        await self._ensure_token()
+        headers = {
+            "As-Task": "false",
+            "Authorization": self._get_auth_token(),
+            "File-Path": parse.quote(f"{remote_path.rstrip('/')}/{file_name}"),
+            "Content-Length": str(len(file_data)),
+        }
+        return await self._request("PUT", "/api/fs/put", headers=headers, data=file_data, timeout=120)
+
     @staticmethod
     def sign(path) -> str:
         """计算签名"""
