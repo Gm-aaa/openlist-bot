@@ -18,26 +18,50 @@ from loguru import logger
 DOWNLOAD_CACHE = {}
 STEP_SELECTING_TOOL = "tool"
 
+# ─── 路径 ID 注册（避免 callback_data 超过 64 字节限制）─────────────────────────
+OD_PATH_COUNTER = 0
+OD_PATH_MAP: dict[str, str] = {}
+
+
+def od_register_path(path: str) -> str:
+    global OD_PATH_COUNTER
+    OD_PATH_COUNTER += 1
+    pid = str(OD_PATH_COUNTER)
+    OD_PATH_MAP[pid] = path
+    return pid
+
+
+def od_get_path(pid: str) -> str:
+    return OD_PATH_MAP.get(pid, "")
+
+
 # ─── 下载完成通知 ──────────────────────────────────────────────────────────────
-PREV_UNDONE_IDS: set[str] = set()
+PREV_DONE_IDS: set[str] = set()
+_COMPLETION_INITIALIZED = False
 
 
 async def check_download_completion(context) -> None:
     """定时检查离线下载任务，完成时主动推送通知（JobQueue 回调）"""
-    global PREV_UNDONE_IDS
+    global PREV_DONE_IDS, _COMPLETION_INITIALIZED
     try:
-        undone = await openlist.get_offline_download_undone_task()
         done = await openlist.get_offline_download_done_task()
 
-        current_undone_ids: set[str] = set()
-        if undone.data and isinstance(undone.data, list):
-            current_undone_ids = {str(t.get("id", "")) for t in undone.data if t.get("id")}
-
+        current_done_ids: set[str] = set()
         done_map: dict[str, dict] = {}
         if done.data and isinstance(done.data, list):
-            done_map = {str(t.get("id", "")): t for t in done.data if t.get("id")}
+            for t in done.data:
+                if t.get("id"):
+                    tid = str(t["id"])
+                    current_done_ids.add(tid)
+                    done_map[tid] = t
 
-        newly_done = PREV_UNDONE_IDS & done_map.keys()
+        # 首次运行：记录已有完成任务，不触发通知
+        if not _COMPLETION_INITIALIZED:
+            PREV_DONE_IDS = current_done_ids
+            _COMPLETION_INITIALIZED = True
+            return
+
+        newly_done = current_done_ids - PREV_DONE_IDS
         for task_id in newly_done:
             task = done_map[task_id]
             name, path = extract_file_info(task.get("name", ""))
@@ -52,7 +76,7 @@ async def check_download_completion(context) -> None:
             except Exception as e:
                 logger.error(f"发送下载通知失败: {e}")
 
-        PREV_UNDONE_IDS = current_undone_ids
+        PREV_DONE_IDS = current_done_ids
     except Exception as e:
         logger.error(f"check_download_completion 失败: {e}")
 STEP_BROWSING_PATH = "browse_path"
@@ -233,25 +257,27 @@ async def show_path_browser(query, cache, path):
                 files.append({"name": name})
         
         buttons = []
-        
+
         # 添加子目录
         for d in dirs[:10]:
             name = d["name"]
             sub_path = f"{path.rstrip('/')}/{name}/"
-            buttons.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"od_cd_{sub_path}")])
-        
+            path_id = od_register_path(sub_path)
+            buttons.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"od_cd_{path_id}")])
+
         # 添加文件（只显示前几个作为参考）
         for f in files[:5]:
             name = f["name"]
             buttons.append([InlineKeyboardButton(f"📄 {name}", callback_data=f"od_file_{name}")])
-        
+
         # 添加确认按钮
         buttons.append([InlineKeyboardButton("✅ 确认路径", callback_data="od_confirm_path")])
-        
+
         # 添加返回按钮
         if path != "/":
             parent_path = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
-            buttons.append([InlineKeyboardButton("⬅️ 返回上一级", callback_data=f"od_cd_{parent_path}")])
+            parent_id = od_register_path(parent_path)
+            buttons.append([InlineKeyboardButton("⬅️ 返回上一级", callback_data=f"od_cd_{parent_id}")])
         
         cache["path"] = path
         
@@ -268,7 +294,11 @@ async def show_path_browser(query, cache, path):
 async def handle_path_browse(query, cache, data):
     """处理路径浏览回调"""
     if data.startswith("od_cd_"):
-        path = data.replace("od_cd_", "")
+        path_id = data.replace("od_cd_", "")
+        path = od_get_path(path_id)
+        if not path:
+            await query.answer("路径已过期，请重新选择", show_alert=True)
+            return
         await show_path_browser(query, cache, path)
         return
     
