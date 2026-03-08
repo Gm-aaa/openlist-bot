@@ -96,13 +96,13 @@ class TorrentPage:
             text_parts.append(text)
             buttons.extend(item_btns)
         
-        header = f"🔍 关键词: {self.keyword} | 结果: {len(self.all_results)} 条\n\n"
+        header = f"🔍 {self.keyword} | {len(self.all_results)} 条结果\n\n"
         text = header + "".join(text_parts)
-        
+
         nav_buttons = [
-            InlineKeyboardButton("⬆️", callback_data="torrent_previous"),
+            InlineKeyboardButton("⬆️ 上一页", callback_data="torrent_previous"),
             InlineKeyboardButton(f"{self.index + 1}/{self.page_count}", callback_data="torrent_page"),
-            InlineKeyboardButton("⬇️", callback_data="torrent_next"),
+            InlineKeyboardButton("⬇️ 下一页", callback_data="torrent_next"),
         ]
         buttons.append(nav_buttons)
         

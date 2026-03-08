@@ -271,7 +271,7 @@ async def show_path_browser(query, cache, path):
             buttons.append([InlineKeyboardButton(f"📄 {name}", callback_data=f"od_file_{name}")])
 
         # 添加确认按钮
-        buttons.append([InlineKeyboardButton("✅ 确认路径", callback_data="od_confirm_path")])
+        buttons.append([InlineKeyboardButton("✅ 确认此路径", callback_data="od_confirm_path")])
 
         # 添加返回按钮
         if path != "/":
@@ -282,8 +282,9 @@ async def show_path_browser(query, cache, path):
         cache["path"] = path
         
         await query.message.edit_text(
-            f"📁 选择存储路径: `{path}`\n\n点击目录进入，点击确认路径按钮完成选择",
-            reply_markup=InlineKeyboardMarkup(buttons)
+            f"📁 选择存储路径: `{path}`\n\n点击目录进入，点击确认此路径按钮完成选择",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
         )
         
     except Exception as e:
