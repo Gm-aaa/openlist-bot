@@ -36,6 +36,13 @@ PAN_TYPE_EMOJI = {
 }
 
 
+def _md_escape(text: str) -> str:
+    """转义 Telegram Markdown v1 特殊字符（用于动态内容）"""
+    for ch in ("_", "*", "[", "`"):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 def build_result_item_sync(count: int, item: PanSouResult) -> str:
     file_name = item.name
     file_url = item.url
@@ -54,7 +61,7 @@ def build_result_item_sync(count: int, item: PanSouResult) -> str:
     pwd_text = f" | 密码: `{password}`" if password else ""
     
     clean_url = file_url.split("#")[0] if file_url else ""
-    url_text = f"\n🔗 {clean_url}" if clean_url else ""
+    url_text = f"\n🔗 {_md_escape(clean_url)}" if clean_url else ""
 
     return f"{count}. {emoji} `{file_name}`\n{file_size}{pwd_text}{url_text}\n\n"
 
@@ -230,9 +237,11 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if data == "search_next_page":
-        text = page.next_page()
+        page.next_page()
+        text = page.get_text_with_info()
     elif data == "search_previous_page":
-        text = page.previous_page()
+        page.previous_page()
+        text = page.get_text_with_info()
     elif data == "search_filter_all":
         page.set_filter(None)
         text = page.get_text_with_info()
