@@ -52,14 +52,14 @@ class TMDbPage:
             text_parts.append(text)
             buttons.extend(item_btns)
         
-        header = f"🎬 搜索: {self.keyword} | 找到: {len(self.all_results)} 条\n\n"
+        header = f"🔍 {self.keyword} | {len(self.all_results)} 条结果\n\n"
         text = header + "".join(text_parts)
-        
+
         if self.page_count > 1:
             nav_buttons = [
-                InlineKeyboardButton("⬆️", callback_data="tmdb_previous"),
+                InlineKeyboardButton("⬆️ 上一页", callback_data="tmdb_previous"),
                 InlineKeyboardButton(f"{self.index + 1}/{self.page_count}", callback_data="tmdb_page"),
-                InlineKeyboardButton("⬇️", callback_data="tmdb_next"),
+                InlineKeyboardButton("⬇️ 下一页", callback_data="tmdb_next"),
             ]
             buttons.append(nav_buttons)
         
@@ -100,13 +100,13 @@ async def sm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     args = context.args
     if not args:
-        return await update.message.reply_text("请加上关键词，例：`/sm 电影名称`")
+        return await update.message.reply_text("请加上关键词，例：`/sm 电影名称`", parse_mode="Markdown")
     
     keyword = " ".join(args)
     if not keyword:
-        return await update.message.reply_text("请加上关键词，例：`/sm 电影名称`")
+        return await update.message.reply_text("请加上关键词，例：`/sm 电影名称`", parse_mode="Markdown")
     
-    search_msg = await update.message.reply_text("🔎 搜索中...")
+    search_msg = await update.message.reply_text("🔄 搜索中...")
     
     try:
         tmdb = get_tmdb(bot_cfg.tmdb_api_key)

@@ -92,7 +92,7 @@ class Page:
         filter_name = ""
         if self.filter_type:
             filter_name = f" | {PAN_TYPE_EMOJI.get(self.filter_type, self.filter_type)}"
-        filter_info = f"🔍 关键词: {self.keyword} | 结果: {total} 条{filter_name}\n\n"
+        filter_info = f"🔍 {self.keyword} | {total} 条结果{filter_name}\n\n"
         return filter_info + text
 
     def now_page(self) -> tuple[str, int, int]:
@@ -155,9 +155,9 @@ class Page:
                 buttons.append(row)
 
         nav_buttons = [
-            InlineKeyboardButton("⬆️上一页", callback_data="search_previous_page"),
+            InlineKeyboardButton("⬆️ 上一页", callback_data="search_previous_page"),
             InlineKeyboardButton(f"{self.index + 1}/{self.page_count}", callback_data="search_pages"),
-            InlineKeyboardButton("⬇️下一页", callback_data="search_next_page"),
+            InlineKeyboardButton("⬇️ 下一页", callback_data="search_next_page"),
         ]
         buttons.append(nav_buttons)
 
@@ -175,7 +175,7 @@ async def s_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     k = " ".join(context.args)
     if not k:
-        return await update.message.reply_text("请加上文件名，例：`/s 巧克力`")
+        return await update.message.reply_text("请加上文件名，例：`/s 巧克力`", parse_mode="Markdown")
     msg = await update.message.reply_text("搜索中...")
 
     try:
@@ -187,7 +187,7 @@ async def s_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.edit_text("未搜索到文件，换个关键词试试吧")
 
     text, button = await build_result(results, msg, k)
-    await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(button), disable_web_page_preview=True)
+    await msg.edit_text(text=text, reply_markup=InlineKeyboardMarkup(button), parse_mode="Markdown", disable_web_page_preview=True)
 
 
 async def build_result(content: list[PanSouResult], msg, keyword: str):
@@ -282,7 +282,7 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(page.btn), disable_web_page_preview=True)
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(page.btn), parse_mode="Markdown", disable_web_page_preview=True)
     except Exception:
         pass
 

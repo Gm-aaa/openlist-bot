@@ -91,7 +91,7 @@ async def st_command(update: Update, context: ContextTypes.DEFAULT_TYPE, message
     buttons = []
     for storage in storages:
         name = storage.remark or storage.mount_path or str(storage.id)
-        status = "❎" if storage.disabled else "✅"
+        status = "❌" if storage.disabled else "✅"
         mount_path = storage.mount_path or "/"
         btn = InlineKeyboardButton(
             f"{status}{name}",
@@ -146,7 +146,8 @@ async def storage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.message.edit_text(
         text=text,
-        reply_markup=InlineKeyboardMarkup(buttons)
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
     )
 
 
@@ -188,7 +189,7 @@ async def file_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         content = FILE_CACHE.get(f"{chat_id}_files", [])
         asyncio.create_task(send_typing(context, chat_id))
         text, buttons = await build_file_list(content, current_path, msg_id, chat_id, page=page)
-        await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons))
+        await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
         return
 
     if data == "back":
@@ -238,7 +239,7 @@ async def copy_file_link(query, file_path: str):
         else:
             text = f"文件: `{file_name}`\n\n打开链接: {full_url}"
 
-        await query.message.reply_text(text, disable_web_page_preview=True)
+        await query.message.reply_text(text, parse_mode="Markdown", disable_web_page_preview=True)
     except Exception as e:
         await query.message.reply_text(f"获取链接失败: {e}")
 
@@ -277,14 +278,15 @@ async def navigate_to_path(query, chat_id: int, msg_id: int, path: str, context:
             InlineKeyboardButton("📁+ 新建文件夹", callback_data="st_mkdir"),
             InlineKeyboardButton("📤 上传文件", callback_data="st_upload"),
         ])
-        await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(btns))
+        await query.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(btns), parse_mode="Markdown")
         return
 
     text, buttons = await build_file_list(content, path, msg_id, chat_id)
 
     await query.message.edit_text(
         text=text,
-        reply_markup=InlineKeyboardMarkup(buttons)
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
     )
 
 
