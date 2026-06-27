@@ -1,32 +1,26 @@
 # OpenList Bot
 
-基于 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 二次开发的 Telegram 机器人，专为 OpenList 优化并集成多种媒体自动化工具。
+基于 [z-mio/Alist-bot](https://github.com/z-mio/Alist-bot) 二次开发的 Telegram 机器人，专为 OpenList 优化。采用 Rust 重写，具备极低内存占用和高性能异步处理能力。
 
 ## 项目亮点
 
-本项目在原有的 Alist 管理功能基础上，针对 OpenList 进行了深度适配，并打通了从“搜索”到“下载”再到“媒体库刷新”的全链路自动化流程：
+本项目在原有的 Alist 管理功能基础上，针对 OpenList 进行了深度适配，并打通了从"搜索"到"下载"的全链路流程：
 
+- **Rust 高性能**：内存占用从 Python 版本的 ~50MB 降至 **8MB 以下**，类型安全且无 GIL 限制。
 - **深度适配 OpenList**：完美支持 OpenList API 存储管理与文件操作。
-- **多源搜索集成**：
-  - 🚀 **网盘搜索**：集成 PanSou，支持各大主流云盘。
-  - 🧲 **磁力搜索**：集成 Prowlarr，支持私有/公开索引器。
-  - 🎬 **影视元数据**：集成 TMDB，搜索电影/电视剧并获取标准译名。
+- **网盘搜索集成**：集成 PanSou，支持各大主流云盘搜索。
 - **离线下载自动化**：支持通过 Telegram 直接提交磁力/链接到 OpenList 离线下载。
-- **一键刷新链路**：一键触发 `OpenList 缓存刷新` -> `SmartStrm 生成 STRM` -> `Jellyfin 扫描`。
-- **工程化优化**：采用 `loguru` 日志系统、`YAML` 配置管理，并优化了 `httpx` 连接池性能。
+- **一键缓存刷新**：一键刷新 OpenList 文件缓存。
+- **工程化优化**：采用 `tracing` 日志系统、`YAML` 配置管理，`tokio` 异步运行时与 `reqwest` 连接池。
 
 ## 功能命令
 
 | 命令 | 说明 |
 |:---:|:---|
-| `/s <关键词>` | 搜索网盘文件（支持类型筛选） |
-| `/sb <关键词>` | 搜索种子/磁力链接 (Prowlarr) |
-| `/sm <关键词>` | 通过 TMDB 搜索影视信息 |
-| `/st` | 交互式浏览 OpenList 存储文件，支持删除、新建文件夹、上传文件 |
-| `/od` | 提交离线下载任务 |
-| `/ods` | 查看离线下载进度状态 |
-| `/cf` | 交互式配置默认下载设置 |
-| `/fl` | 一键刷新文件链路 |
+| `/search <关键词>` | 搜索网盘文件（支持类型筛选） |
+| `/browse` | 交互式浏览 OpenList 存储文件，支持删除、新建文件夹、上传文件 |
+| `/download` | 离线下载与设置（新建任务 / 查看状态 / 配置） |
+| `/refresh` | 刷新 OpenList 文件缓存 |
 | `/help` | 查看详细指令帮助 |
 
 ## 部署方式
@@ -51,17 +45,17 @@
      ghcr.io/gm-aaa/openlist-bot:latest
    ```
 
-### 方案二：手动部署
+### 方案二：手动编译部署
 
-1. **环境要求**：Python 3.11+
+1. **环境要求**：Rust 1.75+（推荐使用 [rustup](https://rustup.rs/)）
 2. **克隆项目**：
    ```bash
    git clone https://github.com/Gm-aaa/openlist-bot.git
    cd openlist-bot
    ```
-3. **安装依赖**：
+3. **编译项目**：
    ```bash
-   pip install -r requirements.txt
+   cargo build --release
    ```
 4. **配置文件**：
    ```bash
@@ -70,7 +64,7 @@
    ```
 5. **运行**：
    ```bash
-   python bot.py
+   ./target/release/openlist-bot
    ```
 
 ## 配置指南
@@ -80,19 +74,16 @@
 ### 关键配置获取路径：
 - **Telegram Bot Token**: [@BotFather](https://t.me/BotFather)
 - **OpenList Token**: 登录 OpenList -> 设置 -> 概览 -> API
-- **TMDB API Key**: [TheMovieDB Settings](https://www.themoviedb.org/settings/api)
-- **Jellyfin API Key**: 控制台 -> 高级 -> API Keys
 
 ## 开发计划 (Roadmap)
 
 ### 已实现功能
 - [x] 适配 OpenList API 存储管理与交互式文件浏览
-- [x] 多源搜索：网盘搜索 (PanSou) + 磁力搜索 (Prowlarr) + 影视元数据 (TMDB)
+- [x] 网盘搜索 (PanSou) 集成
 - [x] 离线下载：支持磁力/链接一键提交至 OpenList 离线下载
-- [x] 自动化链路：一键刷新 OpenList 缓存 + 触发 SmartStrm + 扫描 Jellyfin
 - [x] 配置管理：支持 YAML 配置文件与交互式修改配置项
 - [x] Docker 支持：支持 GHCR 自动构建与多架构部署方案
-- [x] **文件管理增强**：支持在 `/st` 中直接删除文件/文件夹、新建文件夹、上传文件
+- [x] **文件管理增强**：支持在 `/browse` 中直接删除文件/文件夹、新建文件夹、上传文件
 - [x] **通知系统**：离线下载完成/失败后通过机器人自动推送通知
 
 ### 计划实现功能

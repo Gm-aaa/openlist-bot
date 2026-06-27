@@ -1,9 +1,12 @@
 .git
 .gitignore
-__pycache__
-*.pyc
+target/
 logs/
 data/
 Dockerfile
 config.yaml
 .env
+README.md
+REFACTORING_SUMMARY.md
+LICENSE
+.github/

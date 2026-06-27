@@ -1,24 +1,33 @@
-FROM python:3.11-slim
+# ============ 构建阶段 ============
+FROM rust:1.79-bookworm AS builder
 
-# 设置工作目录
 WORKDIR /app
 
-# 设置环境变量
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+# 复制依赖清单以利用 Docker 缓存
+COPY Cargo.toml Cargo.lock ./
 
-# 安装系统依赖（如需 SOCKS 代理支持）
-RUN apt-get update && apt-get install -y --no-install-recommends     gcc     python3-dev     && rm -rf /var/lib/apt/lists/*
+# 创建空的 src/main.rs 以构建依赖层
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release && rm -rf src
 
-# 先复制依赖文件，利用 Docker 缓存
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 复制源码并构建
+COPY src ./src
+RUN touch src/main.rs && cargo build --release
 
-# 复制项目代码
-COPY . .
+# ============ 运行阶段 ============
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 从构建阶段复制编译好的二进制文件
+COPY --from=builder /app/target/release/openlist-bot .
 
 # 创建日志和数据目录
 RUN mkdir -p logs data/torrent_cache data/downloads
 
 # 启动命令
-CMD ["python", "bot.py"]
+CMD ["./openlist-bot"]

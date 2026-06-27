@@ -15,3 +15,8 @@ config.yaml
 *.egg-info/
 dist/
 build/
+
+
+# Added by cargo
+
+/target
