@@ -1,18 +1,19 @@
 # ============ 构建阶段 ============
-FROM rust:1.83-bookworm AS builder
+FROM rust:latest AS builder
 
 WORKDIR /app
 
-# 复制依赖清单以利用 Docker 缓存
+# 安装必要的系统库（编译 openssl/native-tls 需要）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制源码并编译
 COPY Cargo.toml Cargo.lock ./
-
-# 创建空的 src/main.rs 以构建依赖层
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release && rm -rf src
-
-# 复制源码并构建
 COPY src ./src
-RUN touch src/main.rs && cargo build --release
+
+RUN cargo build --release
 
 # ============ 运行阶段 ============
 FROM debian:bookworm-slim
