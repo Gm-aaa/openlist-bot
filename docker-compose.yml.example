@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  openlist-bot:
+    # 从 GitHub Container Registry 自动拉取镜像
+    image: ghcr.io/gm-aaa/openlist-bot:latest
+    container_name: openlist-bot
+    restart: unless-stopped
+    
+    # 如果您想使用本地源码构建，可以取消注释下方 build 部分并注释掉 image 字段：
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
+    volumes:
+      # 挂载机器人配置文件（只读模式）
+      - ./config.yaml:/app/config.yaml:ro
+      
+      # 挂载数据目录，持久化保存种子缓存和内部数据状态
+      - ./data:/app/data
+      
+      # 挂载日志目录
+      - ./logs:/app/logs
+
+    # 配置日志记录以防日志占满硬盘
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
