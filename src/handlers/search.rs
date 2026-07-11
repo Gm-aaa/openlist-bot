@@ -380,8 +380,11 @@ pub async fn handle_s_with_edit(
 
             {
                 let mut pages_cache = ctx.pansou_pages.lock().await;
-                pages_cache.insert(cmid, page);
+                pages_cache.insert(cmid.clone(), page);
             }
+
+            // Keep the PanSou caches bounded across many searches.
+            crate::remember_pansou_session(&ctx, &cmid).await;
 
             bot.edit_message_text(chat_id, search_msg.id, text)
                 .reply_markup(keyboard)

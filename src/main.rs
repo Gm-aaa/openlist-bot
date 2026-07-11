@@ -4,7 +4,7 @@ mod utils;
 mod handlers;
 
 use std::sync::Arc;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use tokio::sync::{Mutex, RwLock};
 use teloxide::prelude::*;
 use teloxide::net::Download;
@@ -109,8 +109,28 @@ pub struct BotContext {
     // Callback & pagination caches
     pub pansou_pages: Mutex<HashMap<String, PanSouPage>>,
     pub pansou_results: Mutex<HashMap<String, PanSouResult>>,
-    
+    // Insertion order of search sessions (cmid), for bounded eviction.
+    pub pansou_order: Mutex<VecDeque<String>>,
+
     pub od_done_ids: Mutex<HashSet<String>>,
+}
+
+/// Maximum number of search sessions kept in the PanSou caches.
+const MAX_PANSOU_SESSIONS: usize = 50;
+
+/// Record a search session and evict the oldest ones so the PanSou caches
+/// stay bounded for a long-running bot.
+pub async fn remember_pansou_session(ctx: &BotContext, cmid: &str) {
+    let mut order = ctx.pansou_order.lock().await;
+    order.retain(|c| c != cmid);
+    order.push_back(cmid.to_string());
+    while order.len() > MAX_PANSOU_SESSIONS {
+        if let Some(old) = order.pop_front() {
+            ctx.pansou_pages.lock().await.remove(&old);
+            let prefix = format!("{}_", old);
+            ctx.pansou_results.lock().await.retain(|k, _| !k.starts_with(&prefix));
+        }
+    }
 }
 
 pub async fn register_path(ctx: &BotContext, path: &str) -> String {
@@ -232,6 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         path_registry: Mutex::new(PathRegistry { map: HashMap::new(), counter: 0 }),
         pansou_pages: Mutex::new(HashMap::new()),
         pansou_results: Mutex::new(HashMap::new()),
+        pansou_order: Mutex::new(VecDeque::new()),
         od_done_ids: Mutex::new(HashSet::new()),
     });
 
@@ -322,7 +343,7 @@ async fn command_handler(
 ) -> ResponseResult<()> {
     match cmd {
         Command::Start => handle_start(bot, msg).await?,
-        Command::Help => handle_help(bot, msg, ctx).await?,
+        Command::Help => handle_help(bot, msg).await?,
         Command::Search(query) => handle_s(bot, msg, query, ctx).await?,
         Command::Browse => handle_st(bot, msg, ctx).await?,
         Command::Download => handle_download(bot, msg, ctx).await?,
