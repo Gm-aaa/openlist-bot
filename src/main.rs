@@ -22,7 +22,7 @@ use crate::handlers::storage_browse::{handle_st, build_file_list};
 use crate::handlers::offline_download::{handle_download, handle_ods, start_background_notifier, extract_file_info, start_od_download_flow};
 use crate::handlers::file_refresh::{handle_refresh, run_refresh_openlist};
 use crate::handlers::config_download::{build_config_edit_menu, CONFIG_ITEMS};
-use crate::utils::{is_admin, format_size};
+use crate::utils::{is_admin, format_size, parent_path, escape_code};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StorageOpState {
@@ -118,6 +118,12 @@ pub async fn register_path(ctx: &BotContext, path: &str) -> String {
     reg.counter += 1;
     let key = reg.counter.to_string();
     reg.map.insert(key.clone(), path.to_string());
+    // Bound memory: keep only the most recent registrations so long-running
+    // sessions don't grow the registry without limit.
+    if reg.map.len() > 5000 {
+        let cutoff = reg.counter.saturating_sub(5000);
+        reg.map.retain(|k, _| k.parse::<usize>().map_or(true, |n| n > cutoff));
+    }
     key
 }
 
@@ -364,7 +370,9 @@ async fn text_message_handler(
                     }
                     let _ = bot.delete_message(chat_id, msg.id).await;
 
-                    let status_msg = bot.send_message(chat_id, format!("⏳ 正在上传 `{}`...", file_name)).await?;
+                    let status_msg = bot.send_message(chat_id, format!("⏳ 正在上传 `{}`", escape_code(&file_name)))
+                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                        .await?;
                     
                     let file_id = doc.file.id.clone();
                     let bot_clone = bot.clone();
@@ -378,7 +386,9 @@ async fn text_message_handler(
                                     Ok(_) => {
                                         match ctx_clone.openlist.fs_put_bytes(bytes, &path, &file_name).await {
                                             Ok(_) => {
-                                                let _ = bot_clone.edit_message_text(chat_id, status_msg.id, format!("✅ `{}` 上传成功", file_name)).await;
+                                                let _ = bot_clone.edit_message_text(chat_id, status_msg.id, format!("✅ `{}` 上传成功", escape_code(&file_name)))
+                                                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                                                    .await;
                                                 if let Some(b_id) = msg_id {
                                                     refresh_browse_message(&bot_clone, &ctx_clone, chat_id, b_id, &path).await;
                                                 }
@@ -805,7 +815,7 @@ async fn callback_handler(
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "sb_confirm_path")]);
                             
                             if cd_path != "/" {
-                                let parent = format!("/{}", cd_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
+                                let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上一级", format!("sb_cd_{}", parent_id))]);
                             }
@@ -954,9 +964,9 @@ async fn callback_handler(
                                 let full_web_url = format!("{}/{}", web_url.trim_end_matches('/'), file_path.trim_start_matches('/'));
 
                                 let text_resp = if let Some(raw) = info.raw_url {
-                                    format!("文件: `{}`\n\n直链: `{}`\n\n打开链接: `{}`", filename, raw, full_web_url)
+                                    format!("文件: `{}`\n\n直链: `{}`\n\n打开链接: `{}`", escape_code(filename), escape_code(&raw), escape_code(&full_web_url))
                                 } else {
-                                    format!("文件: `{}`\n\n打开链接: `{}`", filename, full_web_url)
+                                    format!("文件: `{}`\n\n打开链接: `{}`", escape_code(filename), escape_code(&full_web_url))
                                 };
                                 let _ = bot_clone.send_message(chat_id, text_resp)
                                     .disable_web_page_preview(true)
@@ -1064,8 +1074,8 @@ async fn callback_handler(
                     return Ok(());
                 }
 
-                let parent_path = format!("/{}", current_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
-                let actual_parent = if parent_path.starts_with(root_path.as_str()) { parent_path } else { root_path.clone() };
+                let parent = parent_path(current_path);
+                let actual_parent = if parent.starts_with(root_path.as_str()) { parent } else { root_path.clone() };
 
                 match ctx.openlist.fs_list(&actual_parent).await {
                     Ok(new_files) => {
@@ -1131,14 +1141,14 @@ async fn callback_handler(
                         InlineKeyboardButton::callback("❌ 取消", "del_cancel_msg"),
                     ]]);
 
-                    bot.send_message(chat_id, format!("确认删除 `{}`？\n\n此操作不可撤销！", item_name))
+                    bot.send_message(chat_id, format!("确认删除 `{}`？\n\n此操作不可撤销！", escape_code(item_name)))
                         .reply_markup(keyboard)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                         .await?;
                 }
             } else if data == "del_confirm" {
                 if let Some(del_path) = pending_delete_path {
-                    let dir_path = format!("/{}", del_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
+                    let dir_path = parent_path(del_path);
                     let item_name = del_path.split('/').last().unwrap_or("").to_string();
                     
                     let bot_clone = bot.clone();
@@ -1165,7 +1175,7 @@ async fn callback_handler(
                     tokio::spawn(async move {
                         match ctx_clone.openlist.fs_remove(&dir_path, vec![item_name.clone()]).await {
                             Ok(_) => {
-                                let _ = bot_clone.edit_message_text(chat_id, msg.id, format!("✅ 已删除 `{}`", item_name)).parse_mode(teloxide::types::ParseMode::MarkdownV2).await;
+                                let _ = bot_clone.edit_message_text(chat_id, msg.id, format!("✅ 已删除 `{}`", escape_code(&item_name))).parse_mode(teloxide::types::ParseMode::MarkdownV2).await;
                                 if let Some(b_msg_id) = b_id {
                                     refresh_browse_message(&bot_clone, &ctx_clone, chat_id, b_msg_id, &cur_path).await;
                                 }
@@ -1295,7 +1305,7 @@ async fn callback_handler(
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "od_confirm_path")]);
                             
                             if cd_path != "/" {
-                                let parent = format!("/{}", cd_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
+                                let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("od_cd_{}", parent_id))]);
                             }
@@ -1601,7 +1611,7 @@ async fn callback_handler(
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "cf_confirm_path")]);
                             
                             if cd_path != "/" {
-                                let parent = format!("/{}", cd_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
+                                let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
                             }
@@ -1646,7 +1656,7 @@ async fn callback_handler(
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "cf_confirm_path")]);
                             
                             if cd_path != "/" {
-                                let parent = format!("/{}", cd_path.trim_end_matches('/').rsplit('/').skip(1).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("/"));
+                                let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
                             }

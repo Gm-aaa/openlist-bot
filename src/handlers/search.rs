@@ -6,7 +6,7 @@ use tracing::info;
 use crate::BotContext;
 use crate::api::pansou::PanSouResult;
 use crate::handlers::ui;
-use crate::utils::{is_member, md_escape};
+use crate::utils::{is_member, md_escape, escape_link_url};
 
 const PER_PAGE: usize = 5;
 
@@ -92,7 +92,7 @@ impl PanSouPage {
             // Format list item using bold/hyperlinks
             text.push_str(&format!("{}\\. {} ", index, icon));
             if !is_magnet && !clean_url.is_empty() {
-                text.push_str(&format!("[*{}*]({})\n", name_escaped, clean_url));
+                text.push_str(&format!("[*{}*]({})\n", name_escaped, escape_link_url(clean_url)));
             } else {
                 text.push_str(&format!("*{}*\n", name_escaped));
             }

@@ -11,6 +11,29 @@ pub fn md_escape(text: &str) -> String {
     escaped
 }
 
+/// Escape a string for use inside a MarkdownV2 code span (`` `...` ``).
+/// Only `` ` `` and `\` need escaping inside code entities.
+pub fn escape_code(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('`', "\\`")
+}
+
+/// Escape a URL for use inside a MarkdownV2 link destination `(...)`.
+/// Only `)` and `\` need escaping there.
+pub fn escape_link_url(url: &str) -> String {
+    url.replace('\\', "\\\\").replace(')', "\\)")
+}
+
+/// Return the parent directory of an absolute path.
+///
+/// e.g. `/a/b/c` -> `/a/b`, `/a` -> `/`, `/` -> `/`.
+pub fn parent_path(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(idx) => trimmed[..idx].to_string(),
+    }
+}
+
 pub fn format_size(size: i64) -> String {
     let size_f = size as f64;
     let units = ["B", "KB", "MB", "GB", "TB", "PB"];
