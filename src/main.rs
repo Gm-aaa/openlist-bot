@@ -823,25 +823,26 @@ async fn callback_handler(
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
+                            let dirs: Vec<_> = files.iter().filter(|f| f.is_dir).collect();
                             let mut buttons = Vec::new();
-                            for f in files.iter().take(10) {
-                                if f.is_dir {
-                                    let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
-                                    let sub_id = register_path(&ctx, &sub).await;
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("sb_cd_{}", sub_id))]);
-                                } else {
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📄 {}", f.name), format!("sb_file_{}", f.name))]);
-                                }
+                            for f in dirs.iter().take(10) {
+                                let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
+                                let sub_id = register_path(&ctx, &sub).await;
+                                buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("sb_cd_{}", sub_id))]);
                             }
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "sb_confirm_path")]);
-                            
+
                             if cd_path != "/" {
                                 let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上一级", format!("sb_cd_{}", parent_id))]);
                             }
 
-                            bot.edit_message_text(chat_id, msg.id, format!("📂 选择下载路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", cd_path))
+                            let mut text = format!("📂 选择下载路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
+                            if dirs.len() > 10 {
+                                text.push_str(&format!("\n\n⚠️ 目录过多，仅显示前 10 个（共 {} 个）", dirs.len()));
+                            }
+                            bot.edit_message_text(chat_id, msg.id, text)
                                 .reply_markup(InlineKeyboardMarkup::new(buttons))
                                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                                 .await?;
@@ -1313,25 +1314,26 @@ async fn callback_handler(
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
+                            let dirs: Vec<_> = files.iter().filter(|f| f.is_dir).collect();
                             let mut buttons = Vec::new();
-                            for f in files.iter().take(10) {
-                                if f.is_dir {
-                                    let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
-                                    let sub_id = register_path(&ctx, &sub).await;
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("od_cd_{}", sub_id))]);
-                                } else {
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📄 {}", f.name), format!("od_file_{}", f.name))]);
-                                }
+                            for f in dirs.iter().take(10) {
+                                let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
+                                let sub_id = register_path(&ctx, &sub).await;
+                                buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("od_cd_{}", sub_id))]);
                             }
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "od_confirm_path")]);
-                            
+
                             if cd_path != "/" {
                                 let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("od_cd_{}", parent_id))]);
                             }
 
-                            bot.edit_message_text(chat_id, msg.id, format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", cd_path))
+                            let mut text = format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
+                            if dirs.len() > 10 {
+                                text.push_str(&format!("\n\n⚠️ 目录过多，仅显示前 10 个（共 {} 个）", dirs.len()));
+                            }
+                            bot.edit_message_text(chat_id, msg.id, text)
                                 .reply_markup(InlineKeyboardMarkup::new(buttons))
                                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                                 .await?;
@@ -1621,23 +1623,26 @@ async fn callback_handler(
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
+                            let dirs: Vec<_> = files.iter().filter(|f| f.is_dir).collect();
                             let mut buttons = Vec::new();
-                            for f in files.iter().take(10) {
-                                if f.is_dir {
-                                    let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
-                                    let sub_id = register_path(&ctx, &sub).await;
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("cf_dir_{}", sub_id))]);
-                                }
+                            for f in dirs.iter().take(10) {
+                                let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
+                                let sub_id = register_path(&ctx, &sub).await;
+                                buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("cf_dir_{}", sub_id))]);
                             }
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "cf_confirm_path")]);
-                            
+
                             if cd_path != "/" {
                                 let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
                             }
 
-                            bot.edit_message_text(chat_id, msg.id, format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", cd_path))
+                            let mut text = format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
+                            if dirs.len() > 10 {
+                                text.push_str(&format!("\n\n⚠️ 目录过多，仅显示前 10 个（共 {} 个）", dirs.len()));
+                            }
+                            bot.edit_message_text(chat_id, msg.id, text)
                                 .reply_markup(InlineKeyboardMarkup::new(buttons))
                                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                                 .await?;
@@ -1666,23 +1671,26 @@ async fn callback_handler(
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
+                            let dirs: Vec<_> = files.iter().filter(|f| f.is_dir).collect();
                             let mut buttons = Vec::new();
-                            for f in files.iter().take(10) {
-                                if f.is_dir {
-                                    let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
-                                    let sub_id = register_path(&ctx, &sub).await;
-                                    buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("cf_dir_{}", sub_id))]);
-                                }
+                            for f in dirs.iter().take(10) {
+                                let sub = format!("{}/{}", cd_path.trim_end_matches('/'), f.name.trim_start_matches('/'));
+                                let sub_id = register_path(&ctx, &sub).await;
+                                buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", f.name), format!("cf_dir_{}", sub_id))]);
                             }
                             buttons.push(vec![InlineKeyboardButton::callback("✅ 确认此路径", "cf_confirm_path")]);
-                            
+
                             if cd_path != "/" {
                                 let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
                             }
 
-                            bot.edit_message_text(chat_id, msg.id, format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", cd_path))
+                            let mut text = format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
+                            if dirs.len() > 10 {
+                                text.push_str(&format!("\n\n⚠️ 目录过多，仅显示前 10 个（共 {} 个）", dirs.len()));
+                            }
+                            bot.edit_message_text(chat_id, msg.id, text)
                                 .reply_markup(InlineKeyboardMarkup::new(buttons))
                                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                                 .await?;
