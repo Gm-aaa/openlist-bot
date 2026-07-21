@@ -34,8 +34,11 @@ pub async fn start_od_download_flow(
     let chat_id = msg.chat.id;
     let user_id = clicker_user_id.unwrap_or_else(|| msg.from().map_or(0, |u| u.id.0 as i64));
 
-    let cfg = ctx.config.read().await;
-    if !is_admin(user_id, &cfg) {
+    let authorized = {
+        let cfg = ctx.config.read().await;
+        is_admin(user_id, &cfg)
+    };
+    if !authorized {
         return Ok(());
     }
 
@@ -120,8 +123,11 @@ pub async fn handle_ods(
     let chat_id = msg.chat.id;
     let user_id = clicker_user_id.unwrap_or_else(|| msg.from().map_or(0, |u| u.id.0 as i64));
 
-    let cfg = ctx.config.read().await;
-    if !is_admin(user_id, &cfg) {
+    let authorized = {
+        let cfg = ctx.config.read().await;
+        is_admin(user_id, &cfg)
+    };
+    if !authorized {
         return Ok(());
     }
 

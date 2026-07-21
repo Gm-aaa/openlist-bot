@@ -349,7 +349,7 @@ impl OpenListClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
         headers.insert("As-Task", HeaderValue::from_static("false"));
         headers.insert("File-Path", HeaderValue::from_str(&encoded_path)?);
-        headers.insert("Content-Length", HeaderValue::from_str(&bytes.len().to_string())?);
+        // Content-Length is set automatically by reqwest from the body.
 
         let res = self.client.put(&url)
             .headers(headers)

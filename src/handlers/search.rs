@@ -290,8 +290,11 @@ pub async fn handle_s_with_edit(
     let chat_id = msg.chat.id;
     let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
 
-    let cfg = ctx.config.read().await;
-    if !is_member(chat_id.0, user_id, &cfg) {
+    let is_member_ok = {
+        let cfg = ctx.config.read().await;
+        is_member(chat_id.0, user_id, &cfg)
+    };
+    if !is_member_ok {
         return Ok(());
     }
 

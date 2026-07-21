@@ -22,7 +22,7 @@ use crate::handlers::storage_browse::{handle_st, build_file_list};
 use crate::handlers::offline_download::{handle_download, handle_ods, start_background_notifier, extract_file_info, start_od_download_flow};
 use crate::handlers::file_refresh::{handle_refresh, run_refresh_openlist};
 use crate::handlers::config_download::{build_config_edit_menu, CONFIG_ITEMS};
-use crate::utils::{is_admin, is_member, format_size, parent_path, escape_code};
+use crate::utils::{is_admin, is_member, format_size, parent_path, path_is_within, escape_code};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StorageOpState {
@@ -1125,7 +1125,7 @@ async fn callback_handler(
                 }
 
                 let parent = parent_path(current_path);
-                let actual_parent = if parent.starts_with(root_path.as_str()) { parent } else { root_path.clone() };
+                let actual_parent = if path_is_within(&parent, root_path) { parent } else { root_path.clone() };
 
                 match ctx.openlist.fs_list(&actual_parent).await {
                     Ok(new_files) => {
@@ -1169,8 +1169,12 @@ async fn callback_handler(
         let mut state = states.get(&chat_id).cloned();
         
         if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, browse_msg_id, files, page, op_state, prompt_msg_id, pending_delete_path }) = &mut state {
-            if data.starts_with("del_") {
-                let path_id = data.replace("del_", "");
+            // NOTE: order matters — "del_confirm"/"del_cancel_msg" also start with
+            // "del_", so the exact matches must be handled first (or excluded here),
+            // otherwise clicking 确认/取消 would fall into the generic branch and
+            // silently do nothing.
+            if data.starts_with("del_") && data != "del_confirm" && data != "del_cancel_msg" {
+                let path_id = data.strip_prefix("del_").unwrap_or(&data).to_string();
                 if let Some(del_path) = get_path(&ctx, &path_id).await {
                     *pending_delete_path = Some(del_path.clone());
                     states.insert(chat_id, UserState::StorageBrowse {
@@ -1476,7 +1480,6 @@ async fn callback_handler(
                     let text_resp = format!("⏳ 任务详情\n\n文件名: {}\n进度: {:.0}%\n状态: {}\n路径: {}\n",
                                              filename, task.progress, task.status.unwrap_or_default(), target_path);
                     let keyboard = InlineKeyboardMarkup::new(vec![
-                        vec![InlineKeyboardButton::callback("❌ 取消任务", format!("ods_cancel_{}", task_id))],
                         vec![InlineKeyboardButton::callback("⬅️ 返回列表", "ods_page_1")],
                     ]);
                     bot.edit_message_text(chat_id, msg.id, text_resp)

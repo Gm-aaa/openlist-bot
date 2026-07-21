@@ -34,6 +34,20 @@ pub fn parent_path(path: &str) -> String {
     }
 }
 
+/// Return true if `path` is `root` itself or a descendant of `root`.
+///
+/// Compares by path segments, so `/movies` is NOT considered within `/movie`
+/// (a plain `starts_with` would wrongly say it is).
+pub fn path_is_within(path: &str, root: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let root = root.trim_end_matches('/');
+    if root.is_empty() {
+        // root is "/" (or ""): everything is within it.
+        return true;
+    }
+    path == root || path.starts_with(&format!("{}/", root))
+}
+
 pub fn format_size(size: i64) -> String {
     let size_f = size as f64;
     let units = ["B", "KB", "MB", "GB", "TB", "PB"];

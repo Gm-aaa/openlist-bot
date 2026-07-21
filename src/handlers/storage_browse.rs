@@ -14,8 +14,11 @@ pub async fn handle_st(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> Response
     let chat_id = msg.chat.id;
     let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
 
-    let cfg = ctx.config.read().await;
-    if !is_admin(user_id, &cfg) {
+    let authorized = {
+        let cfg = ctx.config.read().await;
+        is_admin(user_id, &cfg)
+    };
+    if !authorized {
         return Ok(());
     }
 
