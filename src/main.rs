@@ -22,7 +22,7 @@ use crate::handlers::storage_browse::{handle_st, build_file_list};
 use crate::handlers::offline_download::{handle_download, handle_ods, start_background_notifier, extract_file_info, start_od_download_flow};
 use crate::handlers::file_refresh::{handle_refresh, run_refresh_openlist};
 use crate::handlers::config_download::{build_config_edit_menu, CONFIG_ITEMS};
-use crate::utils::{is_admin, format_size, parent_path, escape_code};
+use crate::utils::{is_admin, is_member, format_size, parent_path, escape_code};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StorageOpState {
@@ -366,16 +366,19 @@ async fn text_message_handler(
             // Check if it's a document upload for storage browse
             if let Some(doc) = msg.document() {
                 let mut states = ctx.user_states.lock().await;
-                if let Some(UserState::StorageBrowse { op_state: StorageOpState::AwaitingUpload, current_path, browse_msg_id, prompt_msg_id, .. }) = states.get_mut(&chat_id) {
+                if let Some(UserState::StorageBrowse { op_state: StorageOpState::AwaitingUpload, storage_id, root_path, current_path, browse_msg_id, prompt_msg_id, .. }) = states.get_mut(&chat_id) {
                     let path = current_path.clone();
-                    let msg_id = browse_msg_id.clone();
-                    let prompt_id = prompt_msg_id.clone();
+                    let msg_id = *browse_msg_id;
+                    let prompt_id = *prompt_msg_id;
+                    let sid = storage_id.clone();
+                    let root = root_path.clone();
                     let file_name = doc.file_name.clone().unwrap_or_else(|| "upload_file".to_string());
-                    
-                    // Reset op state
+
+                    // Reset op state (preserve storage_id/root_path so "back to
+                    // storage list" keeps working).
                     *states.get_mut(&chat_id).unwrap() = UserState::StorageBrowse {
-                        storage_id: "".to_string(),
-                        root_path: "".to_string(),
+                        storage_id: sid,
+                        root_path: root,
                         current_path: path.clone(),
                         browse_msg_id: msg_id,
                         files: vec![],
@@ -447,15 +450,16 @@ async fn text_message_handler(
 
             crate::handlers::search::handle_s_with_edit(bot, msg.clone(), text.to_string(), ctx, prompt_msg_id).await?;
         }
-        Some(UserState::StorageBrowse { op_state: StorageOpState::AwaitingMkdir, current_path, browse_msg_id, prompt_msg_id, .. }) => {
+        Some(UserState::StorageBrowse { op_state: StorageOpState::AwaitingMkdir, storage_id, root_path, current_path, browse_msg_id, prompt_msg_id, .. }) => {
             let path = current_path.clone();
-            let msg_id = browse_msg_id.clone();
-            let prompt_id = prompt_msg_id.clone();
-            
-            // Reset op state
+            let msg_id = browse_msg_id;
+            let prompt_id = prompt_msg_id;
+
+            // Reset op state (preserve storage_id/root_path so "back to
+            // storage list" keeps working).
             states.insert(chat_id, UserState::StorageBrowse {
-                storage_id: "".to_string(),
-                root_path: "".to_string(),
+                storage_id: storage_id.clone(),
+                root_path: root_path.clone(),
                 current_path: path.clone(),
                 browse_msg_id: msg_id,
                 files: vec![],
@@ -602,6 +606,27 @@ async fn callback_handler(
         Some(d) => d,
         None => return Ok(()),
     };
+
+    // Authorization: every callback that browses storage, submits downloads,
+    // deletes files or edits config is admin-only. Members (when a member list
+    // is configured) may only page/filter search results, copy links, and open
+    // the search prompt. State is keyed by chat_id, so without this check any
+    // user in a shared group chat could drive another user's admin session.
+    let clicker_id = query.from.id.0 as i64;
+    let member_only_ok = data.starts_with("search_")
+        || data.starts_with("s_cp_")
+        || data == "cfg_src_close"
+        || data == "cfg_src_cancel_input"
+        || data == "cfg_src_start_search";
+    let authorized = {
+        let cfg = ctx.config.read().await;
+        is_admin(clicker_id, &cfg)
+            || (member_only_ok && is_member(chat_id.0, clicker_id, &cfg))
+    };
+    if !authorized {
+        let _ = bot.answer_callback_query(query.id).text("⛔ 你没有权限执行此操作").await;
+        return Ok(());
+    }
 
     let toast_text = if data.starts_with("cd_") || data.starts_with("storage_") || data == "back" || data.starts_with("cf_path_") || data.starts_with("cf_dir_") || data.starts_with("od_cd_") || data.starts_with("sb_cd_") {
         "⏳ 正在加载目录..."
@@ -934,19 +959,21 @@ async fn callback_handler(
             return Ok(());
         }
 
-        if data.starts_with("storage_") {
-            let d = data.replace("storage_", "");
-            let parts: Vec<&str> = d.splitn(2, ':').collect();
-            let storage_id = parts[0];
-            let mount_path = if parts.len() > 1 { parts[1] } else { "/" };
+        if let Some(rest) = data.strip_prefix("storage_") {
+            let parts: Vec<&str> = rest.splitn(2, ':').collect();
+            let storage_id = parts[0].to_string();
+            let mount_path = match parts.get(1) {
+                Some(key) => get_path(&ctx, key).await.unwrap_or_else(|| "/".to_string()),
+                None => "/".to_string(),
+            };
 
-            match ctx.openlist.fs_list(mount_path).await {
+            match ctx.openlist.fs_list(&mount_path).await {
                 Ok(files) => {
                     let mut states = ctx.user_states.lock().await;
                     states.insert(chat_id, UserState::StorageBrowse {
-                        storage_id: storage_id.to_string(),
-                        root_path: mount_path.to_string(),
-                        current_path: mount_path.to_string(),
+                        storage_id: storage_id.clone(),
+                        root_path: mount_path.clone(),
+                        current_path: mount_path.clone(),
                         browse_msg_id: Some(msg.id),
                         files: files.clone(),
                         page: 1,
@@ -956,7 +983,7 @@ async fn callback_handler(
                     });
                     drop(states);
 
-                    let (text, keyboard) = build_file_list(&ctx, &files, mount_path, 1).await;
+                    let (text, keyboard) = build_file_list(&ctx, &files, &mount_path, 1).await;
                     bot.edit_message_text(chat_id, msg.id, text)
                         .reply_markup(keyboard)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
@@ -981,7 +1008,7 @@ async fn callback_handler(
                     tokio::spawn(async move {
                         match ctx_clone.openlist.fs_get(&file_path).await {
                             Ok(info) => {
-                                let filename = file_path.split('/').last().unwrap_or("");
+                                let filename = file_path.split('/').next_back().unwrap_or("");
                                 let web_url = ctx_clone.config.read().await.openlist.openlist_host.clone();
                                 let full_web_url = format!("{}/{}", web_url.trim_end_matches('/'), file_path.trim_start_matches('/'));
 
@@ -1038,7 +1065,7 @@ async fn callback_handler(
                     info!("cd_ path_id {} not found in registry", path_id);
                 }
             } else if data == "browse_prev" || data == "browse_next" {
-                let total_pages = if files.is_empty() { 1 } else { (files.len() + crate::handlers::storage_browse::PER_PAGE - 1) / crate::handlers::storage_browse::PER_PAGE };
+                let total_pages = if files.is_empty() { 1 } else { files.len().div_ceil(crate::handlers::storage_browse::PER_PAGE) };
                 if data == "browse_prev" && *page > 1 {
                     *page -= 1;
                 } else if data == "browse_next" && *page < total_pages {
@@ -1079,9 +1106,10 @@ async fn callback_handler(
                                 let mount = st.mount_path.as_deref().unwrap_or("/");
                                 let name = if !remark.is_empty() { remark } else { mount };
                                 let status = if st.disabled { "❌" } else { "✅" };
+                                let mount_id = register_path(&ctx, mount).await;
                                 buttons.push(vec![InlineKeyboardButton::callback(
                                     format!("{}{}", status, name),
-                                    format!("storage_{}:{}", st.id, mount),
+                                    format!("storage_{}:{}", st.id, mount_id),
                                 )]);
                             }
                             buttons.push(vec![InlineKeyboardButton::callback("❌ 取消", "st_cancel")]);
@@ -1157,7 +1185,7 @@ async fn callback_handler(
                         pending_delete_path: Some(del_path.clone()),
                     });
 
-                    let item_name = del_path.split('/').last().unwrap_or("");
+                    let item_name = del_path.split('/').next_back().unwrap_or("");
                     let keyboard = InlineKeyboardMarkup::new(vec![vec![
                         InlineKeyboardButton::callback("✅ 确认删除", "del_confirm"),
                         InlineKeyboardButton::callback("❌ 取消", "del_cancel_msg"),
@@ -1171,11 +1199,11 @@ async fn callback_handler(
             } else if data == "del_confirm" {
                 if let Some(del_path) = pending_delete_path {
                     let dir_path = parent_path(del_path);
-                    let item_name = del_path.split('/').last().unwrap_or("").to_string();
+                    let item_name = del_path.split('/').next_back().unwrap_or("").to_string();
                     
                     let bot_clone = bot.clone();
                     let ctx_clone = ctx.clone();
-                    let b_id = browse_msg_id.clone();
+                    let b_id = *browse_msg_id;
                     let cur_path = current_path.clone();
                     
                     *pending_delete_path = None;

@@ -42,7 +42,7 @@ impl PanSouPage {
         if count == 0 {
             1
         } else {
-            (count + PER_PAGE - 1) / PER_PAGE
+            count.div_ceil(PER_PAGE)
         }
     }
 

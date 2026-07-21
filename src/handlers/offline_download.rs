@@ -162,7 +162,7 @@ pub async fn handle_ods(
     let done_count = all_tasks.len() - undone_count;
 
     let total = all_tasks.len();
-    let total_pages = if total == 0 { 1 } else { (total + 9) / 10 };
+    let total_pages = if total == 0 { 1 } else { total.div_ceil(10) };
     let page = page.clamp(1, total_pages);
 
     let start = (page - 1) * 10;

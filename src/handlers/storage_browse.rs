@@ -39,10 +39,15 @@ pub async fn handle_st(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> Response
                 let mount = storage.mount_path.as_deref().unwrap_or("/");
                 let name = if !remark.is_empty() { remark } else { mount };
                 let status = if storage.disabled { "❌" } else { "✅" };
-                
+
+                // Register the mount path so the callback data stays a short
+                // numeric id — raw (e.g. CJK) mount paths can blow past
+                // Telegram's 64-byte callback_data limit and make the whole
+                // storage list fail to send.
+                let mount_id = crate::register_path(&ctx, mount).await;
                 buttons.push(vec![InlineKeyboardButton::callback(
                     format!("{}{}", status, name),
-                    format!("storage_{}:{}", storage.id, mount),
+                    format!("storage_{}:{}", storage.id, mount_id),
                 )]);
             }
             buttons.push(vec![InlineKeyboardButton::callback("❌ 取消", "st_cancel")]);
@@ -66,7 +71,7 @@ pub async fn build_file_list(
     page: usize,
 ) -> (String, InlineKeyboardMarkup) {
     let total_items = content.len();
-    let total_pages = if total_items == 0 { 1 } else { (total_items + PER_PAGE - 1) / PER_PAGE };
+    let total_pages = if total_items == 0 { 1 } else { total_items.div_ceil(PER_PAGE) };
     let page = page.clamp(1, total_pages);
 
     let start = (page - 1) * PER_PAGE;
