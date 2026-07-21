@@ -65,6 +65,16 @@ pub fn is_admin(user_id: i64, config: &Config) -> bool {
     user_id == config.user.admin
 }
 
+/// Whether `user_id` (in `chat_id`) may use member-level features (search,
+/// paging, copying links).
+///
+/// ⚠️ FOOTGUN: an **empty** `member` list means *everyone* is treated as a
+/// member — i.e. the search feature is fully public to anyone who can reach the
+/// bot (including every member of any group it's in). This is intentional
+/// "open by default", but if you meant to restrict access you MUST populate
+/// `user.member` in config.yaml with the allowed user IDs (and/or group chat
+/// IDs). A whitelisted group chat_id grants access to *all* of that group's
+/// members.
 pub fn is_member(chat_id: i64, user_id: i64, config: &Config) -> bool {
     if user_id == config.user.admin {
         return true;

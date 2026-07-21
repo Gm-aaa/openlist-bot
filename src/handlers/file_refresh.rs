@@ -30,7 +30,7 @@ pub async fn run_refresh_openlist(ctx: &BotContext) -> String {
     };
 
     info!("Triggering OpenList refresh for path: {}", download_path);
-    match ctx.openlist.fs_list(&download_path).await {
+    match ctx.openlist.fs_list_refresh(&download_path).await {
         Ok(_) => format!("✅ OpenList 缓存已刷新\n\n路径: {}", download_path),
         Err(e) => format!("❌ 刷新失败: {}", e),
     }

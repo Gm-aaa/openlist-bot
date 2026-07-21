@@ -4,6 +4,14 @@
 
 ## [Unreleased] - 2026-07-21
 
+### 修复（第二轮审阅）
+
+- `fs_list` 此前对每一次目录浏览都强制传 `refresh: true`，导致每点一次目录/翻页/进子目录都让 OpenList 对该路径做一次全量重刷。对 115、阿里云等云盘既慢又易触发风控。现在浏览走 `refresh: false`，仅 `/refresh` 命令使用新增的 `fs_list_refresh`（`refresh: true`）。
+- 群聊中「开始搜索资源」建立的 `AwaitingSearchQuery` 状态按 `chat_id` 存储且绕过管理员门禁，导致此后**任意用户**发的下一条消息都会被 bot 删除并当作搜索词消费。现在该状态记录发起者 `user_id`，仅消费发起者本人的消息，其他人的消息不删除、不处理。
+- 离线下载/搜索下载/默认配置三处的下载工具按钮此前把工具名原样内嵌进 `callback_data`（`od_tool_{name}`/`sb_tool_{name}`/`cf_tool_{name}`），与此前修复的挂载路径同属一类：超长/含特殊字符的工具名会突破 Telegram 64 字节回调上限。现在统一经 `register_path` 生成短数字 id。
+- 将 `s_dl_`/`s_cp_`/`search_filter_`/`cd_`/`file_`/`od_cd_`/`sb_cd_`/`cf_path_`/`cf_dir_`/`cf_select_`/`cfg_src_toggle_`/`ods_page_`/`ods_detail_` 等回调残留的 `data.replace(前缀, "")` 全部改为 `strip_prefix`，与既定规范一致，避免前缀在数据中间被误替换。
+- 为 `is_member` 补充文档：空 `member` 列表 = 搜索完全公开（含 bot 所在群任意成员），如需限制访问必须显式填写白名单；`config.example.yaml` 同步加了醒目提示。
+
 ### 修复
 
 - 存储列表按钮的回调数据此前直接内嵌原始挂载路径（`storage_{id}:{mount}`），中文等较长挂载路径会超出 Telegram 64 字节回调数据上限，导致 `/browse`（及"返回上一级"回到存储列表）整条消息发送失败、界面无任何响应。现在改用 `register_path` 生成短数字 id，消费端用 `strip_prefix` + `get_path` 还原路径。

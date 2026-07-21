@@ -96,13 +96,26 @@ impl OpenListClient {
         Ok(())
     }
 
+    /// List a directory without forcing OpenList to re-index the backend.
+    /// Use this for interactive browsing so每次点目录不会把 115/阿里云等云盘
+    /// 全量刷新一遍（慢且易触发风控）。
     pub async fn fs_list(&self, path: &str) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
+        self.fs_list_inner(path, false).await
+    }
+
+    /// List a directory and force OpenList to refresh its cache for that path.
+    /// Only the explicit `/refresh` command should need this.
+    pub async fn fs_list_refresh(&self, path: &str) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
+        self.fs_list_inner(path, true).await
+    }
+
+    async fn fs_list_inner(&self, path: &str, refresh: bool) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/list", self.host.trim_end_matches('/'));
         let body = serde_json::json!({
             "path": path,
             "page": 1,
             "per_page": 0,
-            "refresh": true
+            "refresh": refresh
         });
         
         let res = self.client.post(&url)

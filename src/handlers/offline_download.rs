@@ -57,7 +57,11 @@ pub async fn start_od_download_flow(
 
             let mut buttons = Vec::new();
             for tool in tools {
-                buttons.push(vec![InlineKeyboardButton::callback(tool.clone(), format!("od_tool_{}", tool))]);
+                // Tool names travel back in callback_data; register them so an
+                // unusually long/unicode tool name can't blow Telegram's 64-byte
+                // callback_data limit (same class of bug as raw mount paths).
+                let tool_id = crate::register_path(&ctx, &tool).await;
+                buttons.push(vec![InlineKeyboardButton::callback(tool.clone(), format!("od_tool_{}", tool_id))]);
             }
 
             let reply = bot.send_message(chat_id, "请选择下载工具:")

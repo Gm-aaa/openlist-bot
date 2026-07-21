@@ -88,6 +88,10 @@ pub enum UserState {
     },
     AwaitingSearchQuery {
         prompt_msg_id: Option<MessageId>,
+        // The user who opened the search prompt. State is keyed by chat_id, so
+        // in a group we must only consume the *originator's* next message —
+        // otherwise the bot would eat (and delete) an unrelated user's message.
+        user_id: i64,
     }
 }
 
@@ -470,22 +474,32 @@ async fn text_message_handler(
         }
     };
 
+    let sender_id = msg.from().map_or(0, |u| u.id.0 as i64);
+
     let mut states = ctx.user_states.lock().await;
     let state = states.get(&chat_id).cloned();
+
+    // A pending search prompt is keyed by chat_id but belongs to the user who
+    // opened it. In a group, ignore text from anyone else so we neither run a
+    // search on their behalf nor delete their (unrelated) message.
+    if let Some(UserState::AwaitingSearchQuery { user_id, .. }) = &state {
+        if *user_id != sender_id {
+            return Ok(());
+        }
+    }
 
     // Interactive flows other than search are admin-only. State is keyed by
     // chat_id, so without this check any user in a group chat could drive an
     // admin's session (mkdir name, download URL, config value).
     if !matches!(&state, None | Some(UserState::AwaitingSearchQuery { .. })) {
-        let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
         let cfg = ctx.config.read().await;
-        if !is_admin(user_id, &cfg) {
+        if !is_admin(sender_id, &cfg) {
             return Ok(());
         }
     }
 
     match state {
-        Some(UserState::AwaitingSearchQuery { prompt_msg_id }) => {
+        Some(UserState::AwaitingSearchQuery { prompt_msg_id, .. }) => {
             states.remove(&chat_id);
             drop(states);
 
@@ -721,6 +735,7 @@ async fn callback_handler(
             let mut states = ctx.user_states.lock().await;
             states.insert(chat_id, UserState::AwaitingSearchQuery {
                 prompt_msg_id: Some(prompt.id),
+                user_id: clicker_id,
             });
             return Ok(());
         }
@@ -738,7 +753,7 @@ async fn callback_handler(
         }
 
         if data.starts_with("cfg_src_toggle_") {
-            let key = data.replace("cfg_src_toggle_", "");
+            let key = data.strip_prefix("cfg_src_toggle_").unwrap_or(&data).to_string();
             let mut cfg = ctx.config.write().await;
             let allowed = &mut cfg.search.allowed_sources;
             
@@ -761,7 +776,7 @@ async fn callback_handler(
 
     // Copy magnet/ed2k link callback
     if data.starts_with("s_cp_") {
-        let rest = data.replace("s_cp_", "");
+        let rest = data.strip_prefix("s_cp_").unwrap_or(&data).to_string();
         if let Some(pos) = rest.rfind('_') {
             let cmid_part = &rest[..pos];
             if let Ok(global_idx) = rest[pos + 1..].parse::<usize>() {
@@ -797,7 +812,7 @@ async fn callback_handler(
                 page.filter_type = None;
                 page.index = 0;
             } else if data.starts_with("search_filter_") {
-                let ptype = data.replace("search_filter_", "");
+                let ptype = data.strip_prefix("search_filter_").unwrap_or(&data).to_string();
                 page.filter_type = Some(ptype);
                 page.index = 0;
             }
@@ -818,7 +833,7 @@ async fn callback_handler(
     // PanSou / Torrent download buttons callback
     if data.starts_with("s_dl_") {
         // Format: s_dl_{cmid}_{global_idx}
-        let rest = data.replace("s_dl_", "");
+        let rest = data.strip_prefix("s_dl_").unwrap_or(&data).to_string();
         if let Some(pos) = rest.rfind('_') {
             let cmid_part = &rest[..pos];
             if let Ok(global_idx) = rest[pos + 1..].parse::<usize>() {
@@ -902,7 +917,7 @@ async fn callback_handler(
                     }
                 }
             } else if data.starts_with("sb_cd_") {
-                let path_id = data.replace("sb_cd_", "");
+                let path_id = data.strip_prefix("sb_cd_").unwrap_or(&data).to_string();
                 if let Some(cd_path) = get_path(&ctx, &path_id).await {
                     {
                         let mut states = ctx.user_states.lock().await;
@@ -974,7 +989,8 @@ async fn callback_handler(
                     Ok(tools) => {
                         let mut buttons = Vec::new();
                         for t in tools {
-                            buttons.push(vec![InlineKeyboardButton::callback(t.clone(), format!("sb_tool_{}", t))]);
+                            let tool_id = register_path(&ctx, &t).await;
+                            buttons.push(vec![InlineKeyboardButton::callback(t.clone(), format!("sb_tool_{}", tool_id))]);
                         }
                         buttons.push(vec![InlineKeyboardButton::callback("❌ 取消", "sb_cancel_tool")]);
                         bot.edit_message_text(chat_id, msg.id, "🔧 选择下载工具:")
@@ -986,7 +1002,8 @@ async fn callback_handler(
                     }
                 }
             } else if data.starts_with("sb_tool_") {
-                let new_tool = data.replace("sb_tool_", "");
+                let tool_id = data.strip_prefix("sb_tool_").unwrap_or(&data);
+                let new_tool = get_path(&ctx, tool_id).await.unwrap_or_default();
                 let confirm_state = UserState::TorrentDownloadSelect {
                     index, cmid: cmid.clone(), path: path.clone(), tool: new_tool, url: url.clone(), file_name: file_name.clone(), current_path: None
                 };
@@ -1082,7 +1099,7 @@ async fn callback_handler(
 
         if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, files, page, op_state, prompt_msg_id, pending_delete_path, .. }) = state {
             if data.starts_with("file_") {
-                let path_id = data.replace("file_", "");
+                let path_id = data.strip_prefix("file_").unwrap_or(&data).to_string();
                 if let Some(file_path) = get_path(&ctx, &path_id).await {
                     let bot_clone = bot.clone();
                     let ctx_clone = ctx.clone();
@@ -1110,7 +1127,7 @@ async fn callback_handler(
                     });
                 }
             } else if data.starts_with("cd_") {
-                let path_id = data.replace("cd_", "");
+                let path_id = data.strip_prefix("cd_").unwrap_or(&data).to_string();
                 info!("cd_ callback received, path_id: {}", path_id);
                 if let Some(target_path) = get_path(&ctx, &path_id).await {
                     info!("cd_ target_path: {}", target_path);
@@ -1404,7 +1421,8 @@ async fn callback_handler(
 
         if let Some(UserState::OfflineDownload { step: _, message_id, tool, path, urls }) = state {
             if data.starts_with("od_tool_") {
-                let selected_tool = data.replace("od_tool_", "");
+                let tool_id = data.strip_prefix("od_tool_").unwrap_or(&data);
+                let selected_tool = get_path(&ctx, tool_id).await.unwrap_or_default();
                 // Fetch storage list
                 match ctx.openlist.storage_list().await {
                     Ok(storages) => {
@@ -1438,7 +1456,7 @@ async fn callback_handler(
                     }
                 }
             } else if data.starts_with("od_cd_") {
-                let path_id = data.replace("od_cd_", "");
+                let path_id = data.strip_prefix("od_cd_").unwrap_or(&data).to_string();
                 if let Some(cd_path) = get_path(&ctx, &path_id).await {
                     {
                         let mut states = ctx.user_states.lock().await;
@@ -1551,7 +1569,7 @@ async fn callback_handler(
         }
 
         if data.starts_with("ods_page_") {
-            if let Ok(p) = data.replace("ods_page_", "").parse::<usize>() {
+            if let Ok(p) = data.strip_prefix("ods_page_").unwrap_or(&data).parse::<usize>() {
                 bot.delete_message(chat_id, msg.id).await?;
                 handle_ods(bot.clone(), msg.clone(), ctx.clone(), p, Some(clicker_id)).await?;
             }
@@ -1559,7 +1577,7 @@ async fn callback_handler(
         }
 
         if data.starts_with("ods_detail_") {
-            let task_id = data.replace("ods_detail_", "");
+            let task_id = data.strip_prefix("ods_detail_").unwrap_or(&data).to_string();
             
             // Query details
             bot.edit_message_text(chat_id, msg.id, "🔄 正在读取详情...").await?;
@@ -1685,7 +1703,7 @@ async fn callback_handler(
                 .reply_markup(keyboard)
                 .await?;
         } else if data.starts_with("cf_select_") {
-            let key = data.replace("cf_select_", "");
+            let key = data.strip_prefix("cf_select_").unwrap_or(&data).to_string();
             let mut name = key.as_str();
             for &(k, n) in CONFIG_ITEMS {
                 if k == key {
@@ -1714,7 +1732,8 @@ async fn callback_handler(
                 Ok(tools) => {
                     let mut buttons = Vec::new();
                     for t in tools {
-                        buttons.push(vec![InlineKeyboardButton::callback(t.clone(), format!("cf_tool_{}", t))]);
+                        let tool_id = register_path(&ctx, &t).await;
+                        buttons.push(vec![InlineKeyboardButton::callback(t.clone(), format!("cf_tool_{}", tool_id))]);
                     }
                     buttons.push(vec![InlineKeyboardButton::callback("🔙 返回", "cf_back_menu")]);
                     bot.edit_message_text(chat_id, msg.id, "请选择新的默认下载工具:")
@@ -1726,7 +1745,8 @@ async fn callback_handler(
                 }
             }
         } else if data.starts_with("cf_tool_") {
-            let selected_tool = data.replace("cf_tool_", "");
+            let tool_id = data.strip_prefix("cf_tool_").unwrap_or(&data);
+            let selected_tool = get_path(&ctx, tool_id).await.unwrap_or_default();
             
             // List storage for path
             match ctx.openlist.storage_list().await {
@@ -1762,7 +1782,7 @@ async fn callback_handler(
                 }
             }
         } else if data.starts_with("cf_path_") {
-            let path_id = data.replace("cf_path_", "");
+            let path_id = data.strip_prefix("cf_path_").unwrap_or(&data).to_string();
             if let Some(cd_path) = get_path(&ctx, &path_id).await {
                 let cur_tool = {
                     let states = ctx.user_states.lock().await;
@@ -1818,7 +1838,7 @@ async fn callback_handler(
                 }
             }
         } else if data.starts_with("cf_dir_") {
-            let path_id = data.replace("cf_dir_", "");
+            let path_id = data.strip_prefix("cf_dir_").unwrap_or(&data).to_string();
             if let Some(cd_path) = get_path(&ctx, &path_id).await {
                 let cur_tool = {
                     let states = ctx.user_states.lock().await;
