@@ -282,8 +282,6 @@ pub async fn start_background_notifier(bot: Bot, ctx: Arc<BotContext>) {
                     if let Err(e) = bot.send_message(ChatId(admin_id), msg).await {
                         error!("Failed to send completion notification to admin: {}", e);
                     }
-
-                    done_ids.insert(task.id.clone());
                 }
 
                 // Sync

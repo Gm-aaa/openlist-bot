@@ -22,7 +22,7 @@ use crate::handlers::storage_browse::{handle_st, build_file_list};
 use crate::handlers::offline_download::{handle_download, handle_ods, start_background_notifier, extract_file_info, start_od_download_flow};
 use crate::handlers::file_refresh::{handle_refresh, run_refresh_openlist};
 use crate::handlers::config_download::{build_config_edit_menu, CONFIG_ITEMS};
-use crate::utils::{is_admin, is_member, format_size, parent_path, path_is_within, escape_code};
+use crate::utils::{is_admin, is_member, format_size, parent_path, path_is_within, escape_code, md_escape, escape_link_url};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StorageOpState {
@@ -188,30 +188,77 @@ fn build_client(config: &Config) -> Result<reqwest::Client, reqwest::Error> {
     builder.build()
 }
 
+fn bot_commands() -> Vec<BotCommand> {
+    vec![
+        BotCommand::new("start", "开始使用"),
+        BotCommand::new("search", "搜索网盘文件"),
+        BotCommand::new("browse", "浏览存储"),
+        BotCommand::new("download", "离线下载与设置"),
+        BotCommand::new("refresh", "刷新缓存"),
+        BotCommand::new("help", "查看帮助"),
+    ]
+}
+
+async fn register_bot_commands(bot: &Bot) {
+    if let Err(e) = bot.set_my_commands(bot_commands())
+        .scope(BotCommandScope::AllPrivateChats)
+        .await
+    {
+        error!("Failed to register bot commands (private): {}", e);
+    } else {
+        info!("Bot commands registered for private chats");
+    }
+
+    if let Err(e) = bot.set_my_commands(bot_commands())
+        .scope(BotCommandScope::AllGroupChats)
+        .await
+    {
+        error!("Failed to register bot commands (group): {}", e);
+    } else {
+        info!("Bot commands registered for group chats");
+    }
+}
+
 async fn menu_command(bot: &Bot, msg: &Message, ctx: &BotContext) -> ResponseResult<()> {
     let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
     let cfg = ctx.config.read().await;
     if !is_admin(user_id, &cfg) {
         return Ok(());
     }
+    drop(cfg);
+
+    register_bot_commands(bot).await;
     bot.send_message(msg.chat.id, "菜单设置成功，请退出聊天界面重新进入来刷新菜单").await?;
     Ok(())
 }
 
 async fn toggle_proxy_command(bot: &Bot, msg: &Message, ctx: &BotContext) -> ResponseResult<()> {
     let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
-    let mut cfg = ctx.config.write().await;
-    if !is_admin(user_id, &cfg) {
-        return Ok(());
-    }
-    
-    if let Some(proxy_cfg) = &mut cfg.proxy {
-        proxy_cfg.enable = !proxy_cfg.enable;
-        let status = if proxy_cfg.enable { "开启" } else { "关闭" };
-        let _ = cfg.save();
-        bot.send_message(msg.chat.id, format!("代理已{}，重启机器人后生效", status)).await?;
-    } else {
-        bot.send_message(msg.chat.id, "配置中缺少 proxy 字段，无法切换").await?;
+    // Some(status) = toggled; None = missing proxy section.
+    // The write lock must not be held across the Telegram API await below.
+    let status: Option<&'static str> = {
+        let mut cfg = ctx.config.write().await;
+        if !is_admin(user_id, &cfg) {
+            return Ok(());
+        }
+        match &mut cfg.proxy {
+            Some(proxy_cfg) => {
+                proxy_cfg.enable = !proxy_cfg.enable;
+                let status = if proxy_cfg.enable { "开启" } else { "关闭" };
+                let _ = cfg.save();
+                Some(status)
+            }
+            None => None,
+        }
+    };
+
+    match status {
+        Some(status) => {
+            bot.send_message(msg.chat.id, format!("代理已{}，重启机器人后生效", status)).await?;
+        }
+        None => {
+            bot.send_message(msg.chat.id, "配置中缺少 proxy 字段，无法切换").await?;
+        }
     }
     Ok(())
 }
@@ -257,34 +304,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     // Register Bot commands on Telegram
-    let admin_commands = vec![
-        BotCommand::new("start", "开始使用"),
-        BotCommand::new("search", "搜索网盘文件"),
-        BotCommand::new("browse", "浏览存储"),
-        BotCommand::new("download", "离线下载与设置"),
-        BotCommand::new("refresh", "刷新缓存"),
-        BotCommand::new("help", "查看帮助"),
-    ];
-
-    // Register for all private chats
-    if let Err(e) = bot.set_my_commands(admin_commands.clone())
-        .scope(BotCommandScope::AllPrivateChats)
-        .await
-    {
-        error!("Failed to register bot commands (private): {}", e);
-    } else {
-        info!("Bot commands registered for private chats");
-    }
-
-    // Register for all group chats
-    if let Err(e) = bot.set_my_commands(admin_commands.clone())
-        .scope(BotCommandScope::AllGroupChats)
-        .await
-    {
-        error!("Failed to register bot commands (group): {}", e);
-    } else {
-        info!("Bot commands registered for group chats");
-    }
+    register_bot_commands(&bot).await;
 
     // Send startup message to admin
     let admin_chat_id = {
@@ -365,6 +385,17 @@ async fn text_message_handler(
         None => {
             // Check if it's a document upload for storage browse
             if let Some(doc) = msg.document() {
+                // State is keyed by chat_id: without this check any user in a
+                // group chat could upload through an admin's browse session.
+                let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
+                let authorized = {
+                    let cfg = ctx.config.read().await;
+                    is_admin(user_id, &cfg)
+                };
+                if !authorized {
+                    return Ok(());
+                }
+
                 let mut states = ctx.user_states.lock().await;
                 if let Some(UserState::StorageBrowse { op_state: StorageOpState::AwaitingUpload, storage_id, root_path, current_path, browse_msg_id, prompt_msg_id, .. }) = states.get_mut(&chat_id) {
                     let path = current_path.clone();
@@ -372,7 +403,8 @@ async fn text_message_handler(
                     let prompt_id = *prompt_msg_id;
                     let sid = storage_id.clone();
                     let root = root_path.clone();
-                    let file_name = doc.file_name.clone().unwrap_or_else(|| "upload_file".to_string());
+                    let file_name = doc.file_name.clone().unwrap_or_else(|| "upload_file".to_string())
+                        .replace(['/', '\\'], "_");
 
                     // Reset op state (preserve storage_id/root_path so "back to
                     // storage list" keeps working).
@@ -440,6 +472,17 @@ async fn text_message_handler(
 
     let mut states = ctx.user_states.lock().await;
     let state = states.get(&chat_id).cloned();
+
+    // Interactive flows other than search are admin-only. State is keyed by
+    // chat_id, so without this check any user in a group chat could drive an
+    // admin's session (mkdir name, download URL, config value).
+    if !matches!(&state, None | Some(UserState::AwaitingSearchQuery { .. })) {
+        let user_id = msg.from().map_or(0, |u| u.id.0 as i64);
+        let cfg = ctx.config.read().await;
+        if !is_admin(user_id, &cfg) {
+            return Ok(());
+        }
+    }
 
     match state {
         Some(UserState::AwaitingSearchQuery { prompt_msg_id }) => {
@@ -515,50 +558,59 @@ async fn text_message_handler(
             states.remove(&chat_id);
             drop(states);
 
-            // Edit config item
-            let mut cfg = ctx.config.write().await;
-            
+            // Edit config item. The write lock must be released before any
+            // Telegram API await, otherwise every auth check (config read)
+            // blocks until the send completes.
             let mut success = true;
             let mut error_msg = String::new();
-            
-            match key.as_str() {
-                "openlist.download_path" => cfg.openlist.download_path = text.to_string(),
-                "openlist.download_tool" => cfg.openlist.download_tool = text.to_string(),
-                "proxy.enable" => {
-                    let val = text.to_lowercase() == "true";
-                    if let Some(p) = &mut cfg.proxy {
-                        p.enable = val;
-                    } else {
-                        cfg.proxy = Some(crate::config::ProxyConfig { enable: val, hostname: "".to_string(), port: 1080, scheme: "http".to_string() });
-                    }
-                }
-                "proxy.hostname" => {
-                    if let Some(p) = &mut cfg.proxy {
-                        p.hostname = text.to_string();
-                    }
-                }
-                "proxy.port" => {
-                    if let Ok(p_port) = text.parse::<u16>() {
+            let mut save_err: Option<String> = None;
+
+            {
+                let mut cfg = ctx.config.write().await;
+
+                match key.as_str() {
+                    "openlist.download_path" => cfg.openlist.download_path = text.to_string(),
+                    "openlist.download_tool" => cfg.openlist.download_tool = text.to_string(),
+                    "proxy.enable" => {
+                        let val = text.to_lowercase() == "true";
                         if let Some(p) = &mut cfg.proxy {
-                            p.port = p_port;
+                            p.enable = val;
+                        } else {
+                            cfg.proxy = Some(crate::config::ProxyConfig { enable: val, hostname: "".to_string(), port: 1080, scheme: "http".to_string() });
                         }
-                    } else {
+                    }
+                    "proxy.hostname" => {
+                        if let Some(p) = &mut cfg.proxy {
+                            p.hostname = text.to_string();
+                        }
+                    }
+                    "proxy.port" => {
+                        if let Ok(p_port) = text.parse::<u16>() {
+                            if let Some(p) = &mut cfg.proxy {
+                                p.port = p_port;
+                            }
+                        } else {
+                            success = false;
+                            error_msg = "端口必须是数字".to_string();
+                        }
+                    }
+                    _ => {
                         success = false;
-                        error_msg = "端口必须是数字".to_string();
+                        error_msg = "未知配置项".to_string();
                     }
                 }
-                _ => {
-                    success = false;
-                    error_msg = "未知配置项".to_string();
+
+                if success {
+                    if let Err(e) = cfg.save() {
+                        save_err = Some(e.to_string());
+                    }
                 }
             }
 
-            if success {
-                if let Err(e) = cfg.save() {
-                    bot.send_message(chat_id, format!("❌ 保存失败: {}", e)).await?;
-                } else {
-                    bot.send_message(chat_id, format!("✅ 配置已更新！\n\n• {}: {}\n\n⚠️ 部分配置需要重启机器人后生效", name, text)).await?;
-                }
+            if let Some(e) = save_err {
+                bot.send_message(chat_id, format!("❌ 保存失败: {}", e)).await?;
+            } else if success {
+                bot.send_message(chat_id, format!("✅ 配置已更新！\n\n• {}: {}\n\n⚠️ 部分配置需要重启机器人后生效", name, text)).await?;
             } else {
                 bot.send_message(chat_id, format!("❌ 更新失败: {}", error_msg)).await?;
             }
@@ -713,9 +765,12 @@ async fn callback_handler(
         if let Some(pos) = rest.rfind('_') {
             let cmid_part = &rest[..pos];
             if let Ok(global_idx) = rest[pos + 1..].parse::<usize>() {
-                let pansou_results = ctx.pansou_results.lock().await;
-                if let Some(item) = pansou_results.get(&format!("{}_{}", cmid_part, global_idx)) {
-                    let escaped_url = item.url.replace('\\', "\\\\").replace('`', "\\`");
+                let item_url = {
+                    let pansou_results = ctx.pansou_results.lock().await;
+                    pansou_results.get(&format!("{}_{}", cmid_part, global_idx)).map(|item| item.url.clone())
+                };
+                if let Some(url) = item_url {
+                    let escaped_url = url.replace('\\', "\\\\").replace('`', "\\`");
                     let _ = bot.send_message(chat_id, format!("`{}`", escaped_url))
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                         .await;
@@ -767,8 +822,11 @@ async fn callback_handler(
         if let Some(pos) = rest.rfind('_') {
             let cmid_part = &rest[..pos];
             if let Ok(global_idx) = rest[pos + 1..].parse::<usize>() {
-                let pansou_results = ctx.pansou_results.lock().await;
-                if let Some(item) = pansou_results.get(&format!("{}_{}", cmid_part, global_idx)) {
+                let item = {
+                    let pansou_results = ctx.pansou_results.lock().await;
+                    pansou_results.get(&format!("{}_{}", cmid_part, global_idx)).cloned()
+                };
+                if let Some(item) = item {
                     let (dl_path, dl_tool) = {
                         let cfg = ctx.config.read().await;
                         (cfg.openlist.download_path.clone(), cfg.openlist.download_tool.clone())
@@ -780,8 +838,7 @@ async fn callback_handler(
                         item.name.clone()
                     };
 
-                    let mut states = ctx.user_states.lock().await;
-                    states.insert(chat_id, UserState::TorrentDownloadSelect {
+                    let new_state = UserState::TorrentDownloadSelect {
                         index: global_idx,
                         cmid: cmid_part.to_string(),
                         path: dl_path,
@@ -789,10 +846,13 @@ async fn callback_handler(
                         url: item.url.clone(),
                         file_name,
                         current_path: None,
-                    });
+                    };
 
-                    let info = states.get(&chat_id).unwrap();
-                    let (text, keyboard) = build_download_confirm_message(info).await;
+                    let (text, keyboard) = build_download_confirm_message(&new_state).await;
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, new_state);
+                    }
                     bot.edit_message_text(chat_id, msg.id, text)
                         .reply_markup(keyboard)
                         .await?;
@@ -806,10 +866,12 @@ async fn callback_handler(
 
     // Torrent Download Config Select (sb_path_select, sb_tool_select, tb_add_)
     if data == "sb_path_select" || data == "sb_tool_select" || data.starts_with("tb_add_") || data.starts_with("sb_tool_") || data.starts_with("sb_cd_") || data == "sb_confirm_path" || data.starts_with("sb_cancel") {
-        let mut states = ctx.user_states.lock().await;
-        let mut state = states.get(&chat_id).cloned();
-        
-        if let Some(UserState::TorrentDownloadSelect { index, cmid, path, tool, url, file_name, current_path }) = &mut state {
+        let state = {
+            let states = ctx.user_states.lock().await;
+            states.get(&chat_id).cloned()
+        };
+
+        if let Some(UserState::TorrentDownloadSelect { index, cmid, path, tool, url, file_name, current_path }) = state {
             if data == "sb_path_select" {
                 // List storages
                 match ctx.openlist.storage_list().await {
@@ -823,11 +885,13 @@ async fn callback_handler(
                             buttons.push(vec![InlineKeyboardButton::callback(format!("📁 {}", name), format!("sb_cd_{}", path_id))]);
                         }
                         buttons.push(vec![InlineKeyboardButton::callback("❌ 取消", "sb_cancel_path")]);
-                        
-                        *current_path = Some("/".to_string());
-                        states.insert(chat_id, UserState::TorrentDownloadSelect {
-                            index: *index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: Some("/".to_string())
-                        });
+
+                        {
+                            let mut states = ctx.user_states.lock().await;
+                            states.insert(chat_id, UserState::TorrentDownloadSelect {
+                                index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: Some("/".to_string())
+                            });
+                        }
 
                         bot.edit_message_text(chat_id, msg.id, "📂 选择存储路径:")
                             .reply_markup(InlineKeyboardMarkup::new(buttons))
@@ -840,10 +904,12 @@ async fn callback_handler(
             } else if data.starts_with("sb_cd_") {
                 let path_id = data.replace("sb_cd_", "");
                 if let Some(cd_path) = get_path(&ctx, &path_id).await {
-                    *current_path = Some(cd_path.clone());
-                    states.insert(chat_id, UserState::TorrentDownloadSelect {
-                        index: *index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: Some(cd_path.clone())
-                    });
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, UserState::TorrentDownloadSelect {
+                            index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: Some(cd_path.clone())
+                        });
+                    }
 
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
@@ -880,20 +946,26 @@ async fn callback_handler(
             } else if data == "sb_confirm_path" {
                 if let Some(cd_path) = current_path {
                     let confirm_state = UserState::TorrentDownloadSelect {
-                        index: *index, cmid: cmid.clone(), path: cd_path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: None
+                        index, cmid: cmid.clone(), path: cd_path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: None
                     };
                     let (text, keyboard) = build_download_confirm_message(&confirm_state).await;
-                    states.insert(chat_id, confirm_state);
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, confirm_state);
+                    }
                     bot.edit_message_text(chat_id, msg.id, text)
                         .reply_markup(keyboard)
                         .await?;
                 }
             } else if data.starts_with("sb_cancel") {
                 let cancel_state = UserState::TorrentDownloadSelect {
-                    index: *index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: None
+                    index, cmid: cmid.clone(), path: path.clone(), tool: tool.clone(), url: url.clone(), file_name: file_name.clone(), current_path: None
                 };
                 let (text, keyboard) = build_download_confirm_message(&cancel_state).await;
-                states.insert(chat_id, cancel_state);
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, cancel_state);
+                }
                 bot.edit_message_text(chat_id, msg.id, text)
                     .reply_markup(keyboard)
                     .await?;
@@ -916,25 +988,30 @@ async fn callback_handler(
             } else if data.starts_with("sb_tool_") {
                 let new_tool = data.replace("sb_tool_", "");
                 let confirm_state = UserState::TorrentDownloadSelect {
-                    index: *index, cmid: cmid.clone(), path: path.clone(), tool: new_tool, url: url.clone(), file_name: file_name.clone(), current_path: None
+                    index, cmid: cmid.clone(), path: path.clone(), tool: new_tool, url: url.clone(), file_name: file_name.clone(), current_path: None
                 };
                 let (text, keyboard) = build_download_confirm_message(&confirm_state).await;
-                states.insert(chat_id, confirm_state);
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, confirm_state);
+                }
                 bot.edit_message_text(chat_id, msg.id, text)
                     .reply_markup(keyboard)
                     .await?;
             } else if data.starts_with("tb_add_") {
                 bot.send_message(chat_id, "🔄 准备下载...").await?;
-                
+
                 let urls = vec![url.clone()];
                 let tool_val = tool.clone();
                 let path_val = path.clone();
                 let bot_clone = bot.clone();
                 let ctx_clone = ctx.clone();
-                
-                states.remove(&chat_id);
-                drop(states);
-                
+
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.remove(&chat_id);
+                }
+
                 tokio::spawn(async move {
                     match ctx_clone.openlist.add_offline_download(urls.clone(), &tool_val, &path_val).await {
                         Ok(_) => {
@@ -953,8 +1030,10 @@ async fn callback_handler(
     // Storage Browse Interactive callback
     if data.starts_with("storage_") || data.starts_with("file_") || data.starts_with("cd_") || data == "browse_prev" || data == "browse_next" || data == "back" || data == "st_cancel" {
         if data == "st_cancel" {
-            let mut states = ctx.user_states.lock().await;
-            states.remove(&chat_id);
+            {
+                let mut states = ctx.user_states.lock().await;
+                states.remove(&chat_id);
+            }
             bot.edit_message_text(chat_id, msg.id, "❌ 已取消").await?;
             return Ok(());
         }
@@ -996,10 +1075,12 @@ async fn callback_handler(
             return Ok(());
         }
 
-        let mut states = ctx.user_states.lock().await;
-        let mut state = states.get(&chat_id).cloned();
-        
-        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, files, page, op_state, prompt_msg_id, pending_delete_path, .. }) = &mut state {
+        let state = {
+            let states = ctx.user_states.lock().await;
+            states.get(&chat_id).cloned()
+        };
+
+        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, files, page, op_state, prompt_msg_id, pending_delete_path, .. }) = state {
             if data.starts_with("file_") {
                 let path_id = data.replace("file_", "");
                 if let Some(file_path) = get_path(&ctx, &path_id).await {
@@ -1010,7 +1091,7 @@ async fn callback_handler(
                             Ok(info) => {
                                 let filename = file_path.split('/').next_back().unwrap_or("");
                                 let web_url = ctx_clone.config.read().await.openlist.openlist_host.clone();
-                                let full_web_url = format!("{}/{}", web_url.trim_end_matches('/'), file_path.trim_start_matches('/'));
+                                let full_web_url = format!("{}/#{}", web_url.trim_end_matches('/'), file_path);
 
                                 let text_resp = if let Some(raw) = info.raw_url {
                                     format!("文件: `{}`\n\n直链: `{}`\n\n打开链接: `{}`", escape_code(filename), escape_code(&raw), escape_code(&full_web_url))
@@ -1035,21 +1116,20 @@ async fn callback_handler(
                     info!("cd_ target_path: {}", target_path);
                     match ctx.openlist.fs_list(&target_path).await {
                         Ok(new_files) => {
-                            *current_path = target_path.clone();
-                            *files = new_files.clone();
-                            *page = 1;
-                            
-                            states.insert(chat_id, UserState::StorageBrowse {
-                                storage_id: storage_id.clone(),
-                                root_path: root_path.clone(),
-                                current_path: target_path.clone(),
-                                browse_msg_id: Some(msg.id),
-                                files: new_files.clone(),
-                                page: 1,
-                                op_state: op_state.clone(),
-                                prompt_msg_id: *prompt_msg_id,
-                                pending_delete_path: pending_delete_path.clone(),
-                            });
+                            {
+                                let mut states = ctx.user_states.lock().await;
+                                states.insert(chat_id, UserState::StorageBrowse {
+                                    storage_id: storage_id.clone(),
+                                    root_path: root_path.clone(),
+                                    current_path: target_path.clone(),
+                                    browse_msg_id: Some(msg.id),
+                                    files: new_files.clone(),
+                                    page: 1,
+                                    op_state: op_state.clone(),
+                                    prompt_msg_id,
+                                    pending_delete_path: pending_delete_path.clone(),
+                                });
+                            }
 
                             let (text, keyboard) = build_file_list(&ctx, &new_files, &target_path, 1).await;
                             bot.edit_message_text(chat_id, msg.id, text)
@@ -1066,24 +1146,30 @@ async fn callback_handler(
                 }
             } else if data == "browse_prev" || data == "browse_next" {
                 let total_pages = if files.is_empty() { 1 } else { files.len().div_ceil(crate::handlers::storage_browse::PER_PAGE) };
-                if data == "browse_prev" && *page > 1 {
-                    *page -= 1;
-                } else if data == "browse_next" && *page < total_pages {
-                    *page += 1;
-                }
-                states.insert(chat_id, UserState::StorageBrowse {
-                    storage_id: storage_id.clone(),
-                    root_path: root_path.clone(),
-                    current_path: current_path.clone(),
-                    browse_msg_id: Some(msg.id),
-                    files: files.clone(),
-                    page: *page,
-                    op_state: op_state.clone(),
-                    prompt_msg_id: *prompt_msg_id,
-                    pending_delete_path: pending_delete_path.clone(),
-                });
+                let new_page = if data == "browse_prev" && page > 1 {
+                    page - 1
+                } else if data == "browse_next" && page < total_pages {
+                    page + 1
+                } else {
+                    page
+                };
 
-                let (text, keyboard) = build_file_list(&ctx, files, current_path, *page).await;
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, UserState::StorageBrowse {
+                        storage_id: storage_id.clone(),
+                        root_path: root_path.clone(),
+                        current_path: current_path.clone(),
+                        browse_msg_id: Some(msg.id),
+                        files: files.clone(),
+                        page: new_page,
+                        op_state: op_state.clone(),
+                        prompt_msg_id,
+                        pending_delete_path: pending_delete_path.clone(),
+                    });
+                }
+
+                let (text, keyboard) = build_file_list(&ctx, &files, &current_path, new_page).await;
                 bot.edit_message_text(chat_id, msg.id, text)
                     .reply_markup(keyboard)
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
@@ -1091,8 +1177,10 @@ async fn callback_handler(
             } else if data == "back" {
                 if current_path == root_path {
                     // Go back to storage list - edit current message inline
-                    states.remove(&chat_id);
-                    drop(states);
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.remove(&chat_id);
+                    }
 
                     match ctx.openlist.storage_list().await {
                         Ok(storages) => {
@@ -1124,26 +1212,25 @@ async fn callback_handler(
                     return Ok(());
                 }
 
-                let parent = parent_path(current_path);
-                let actual_parent = if path_is_within(&parent, root_path) { parent } else { root_path.clone() };
+                let parent = parent_path(&current_path);
+                let actual_parent = if path_is_within(&parent, &root_path) { parent } else { root_path.clone() };
 
                 match ctx.openlist.fs_list(&actual_parent).await {
                     Ok(new_files) => {
-                        *current_path = actual_parent.clone();
-                        *files = new_files.clone();
-                        *page = 1;
-
-                        states.insert(chat_id, UserState::StorageBrowse {
-                            storage_id: storage_id.clone(),
-                            root_path: root_path.clone(),
-                            current_path: actual_parent.clone(),
-                            browse_msg_id: Some(msg.id),
-                            files: new_files.clone(),
-                            page: 1,
-                            op_state: op_state.clone(),
-                            prompt_msg_id: *prompt_msg_id,
-                            pending_delete_path: pending_delete_path.clone(),
-                        });
+                        {
+                            let mut states = ctx.user_states.lock().await;
+                            states.insert(chat_id, UserState::StorageBrowse {
+                                storage_id: storage_id.clone(),
+                                root_path: root_path.clone(),
+                                current_path: actual_parent.clone(),
+                                browse_msg_id: Some(msg.id),
+                                files: new_files.clone(),
+                                page: 1,
+                                op_state: op_state.clone(),
+                                prompt_msg_id,
+                                pending_delete_path: pending_delete_path.clone(),
+                            });
+                        }
 
                         let (text, keyboard) = build_file_list(&ctx, &new_files, &actual_parent, 1).await;
                         bot.edit_message_text(chat_id, msg.id, text)
@@ -1165,10 +1252,12 @@ async fn callback_handler(
 
     // Storage Browse deletion callbacks (del_, del_confirm, del_cancel_msg)
     if data.starts_with("del_") || data == "del_confirm" || data == "del_cancel_msg" {
-        let mut states = ctx.user_states.lock().await;
-        let mut state = states.get(&chat_id).cloned();
-        
-        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, browse_msg_id, files, page, op_state, prompt_msg_id, pending_delete_path }) = &mut state {
+        let state = {
+            let states = ctx.user_states.lock().await;
+            states.get(&chat_id).cloned()
+        };
+
+        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, browse_msg_id, files, page, op_state, prompt_msg_id, pending_delete_path }) = state {
             // NOTE: order matters — "del_confirm"/"del_cancel_msg" also start with
             // "del_", so the exact matches must be handled first (or excluded here),
             // otherwise clicking 确认/取消 would fall into the generic branch and
@@ -1176,18 +1265,20 @@ async fn callback_handler(
             if data.starts_with("del_") && data != "del_confirm" && data != "del_cancel_msg" {
                 let path_id = data.strip_prefix("del_").unwrap_or(&data).to_string();
                 if let Some(del_path) = get_path(&ctx, &path_id).await {
-                    *pending_delete_path = Some(del_path.clone());
-                    states.insert(chat_id, UserState::StorageBrowse {
-                        storage_id: storage_id.clone(),
-                        root_path: root_path.clone(),
-                        current_path: current_path.clone(),
-                        browse_msg_id: *browse_msg_id,
-                        files: files.clone(),
-                        page: *page,
-                        op_state: op_state.clone(),
-                        prompt_msg_id: *prompt_msg_id,
-                        pending_delete_path: Some(del_path.clone()),
-                    });
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, UserState::StorageBrowse {
+                            storage_id: storage_id.clone(),
+                            root_path: root_path.clone(),
+                            current_path: current_path.clone(),
+                            browse_msg_id,
+                            files: files.clone(),
+                            page,
+                            op_state: op_state.clone(),
+                            prompt_msg_id,
+                            pending_delete_path: Some(del_path.clone()),
+                        });
+                    }
 
                     let item_name = del_path.split('/').next_back().unwrap_or("");
                     let keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -1202,27 +1293,28 @@ async fn callback_handler(
                 }
             } else if data == "del_confirm" {
                 if let Some(del_path) = pending_delete_path {
-                    let dir_path = parent_path(del_path);
+                    let dir_path = parent_path(&del_path);
                     let item_name = del_path.split('/').next_back().unwrap_or("").to_string();
-                    
+
                     let bot_clone = bot.clone();
                     let ctx_clone = ctx.clone();
-                    let b_id = *browse_msg_id;
+                    let b_id = browse_msg_id;
                     let cur_path = current_path.clone();
-                    
-                    *pending_delete_path = None;
-                    states.insert(chat_id, UserState::StorageBrowse {
-                        storage_id: storage_id.clone(),
-                        root_path: root_path.clone(),
-                        current_path: current_path.clone(),
-                        browse_msg_id: *browse_msg_id,
-                        files: files.clone(),
-                        page: *page,
-                        op_state: op_state.clone(),
-                        prompt_msg_id: *prompt_msg_id,
-                        pending_delete_path: None,
-                    });
-                    drop(states);
+
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, UserState::StorageBrowse {
+                            storage_id: storage_id.clone(),
+                            root_path: root_path.clone(),
+                            current_path: current_path.clone(),
+                            browse_msg_id,
+                            files: files.clone(),
+                            page,
+                            op_state: op_state.clone(),
+                            prompt_msg_id,
+                            pending_delete_path: None,
+                        });
+                    }
 
                     bot.edit_message_text(chat_id, msg.id, "🔄 正在删除...").await?;
 
@@ -1241,18 +1333,20 @@ async fn callback_handler(
                     });
                 }
             } else if data == "del_cancel_msg" {
-                *pending_delete_path = None;
-                states.insert(chat_id, UserState::StorageBrowse {
-                    storage_id: storage_id.clone(),
-                    root_path: root_path.clone(),
-                    current_path: current_path.clone(),
-                    browse_msg_id: *browse_msg_id,
-                    files: files.clone(),
-                    page: *page,
-                    op_state: op_state.clone(),
-                    prompt_msg_id: *prompt_msg_id,
-                    pending_delete_path: None,
-                });
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, UserState::StorageBrowse {
+                        storage_id: storage_id.clone(),
+                        root_path: root_path.clone(),
+                        current_path: current_path.clone(),
+                        browse_msg_id,
+                        files: files.clone(),
+                        page,
+                        op_state: op_state.clone(),
+                        prompt_msg_id,
+                        pending_delete_path: None,
+                    });
+                }
                 bot.edit_message_text(chat_id, msg.id, "❌ 已取消").await?;
             }
         }
@@ -1260,17 +1354,21 @@ async fn callback_handler(
 
     // Storage Browse Operation callbacks (st_mkdir, st_upload, st_op_cancel)
     if data == "st_mkdir" || data == "st_upload" || data == "st_op_cancel" {
-        let mut states = ctx.user_states.lock().await;
-        let mut state = states.get(&chat_id).cloned();
-        
-        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, browse_msg_id, files, page, op_state, prompt_msg_id, pending_delete_path }) = &mut state {
+        let state = {
+            let states = ctx.user_states.lock().await;
+            states.get(&chat_id).cloned()
+        };
+
+        if let Some(UserState::StorageBrowse { storage_id, root_path, current_path, browse_msg_id, files, page, op_state: _, prompt_msg_id, pending_delete_path }) = state {
             if data == "st_op_cancel" {
-                *op_state = StorageOpState::None;
-                states.insert(chat_id, UserState::StorageBrowse {
-                    storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id: *browse_msg_id, files: files.clone(), page: *page, op_state: StorageOpState::None, prompt_msg_id: None, pending_delete_path: pending_delete_path.clone()
-                });
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, UserState::StorageBrowse {
+                        storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id, files: files.clone(), page, op_state: StorageOpState::None, prompt_msg_id: None, pending_delete_path: pending_delete_path.clone()
+                    });
+                }
                 if let Some(pid) = prompt_msg_id {
-                    let _ = bot.delete_message(chat_id, *pid).await;
+                    let _ = bot.delete_message(chat_id, pid).await;
                 }
                 bot.edit_message_text(chat_id, msg.id, "❌ 已取消").await?;
             } else if data == "st_mkdir" {
@@ -1279,8 +1377,9 @@ async fn callback_handler(
                     .reply_markup(keyboard)
                     .await?;
 
+                let mut states = ctx.user_states.lock().await;
                 states.insert(chat_id, UserState::StorageBrowse {
-                    storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id: *browse_msg_id, files: files.clone(), page: *page, op_state: StorageOpState::AwaitingMkdir, prompt_msg_id: Some(prompt.id), pending_delete_path: pending_delete_path.clone()
+                    storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id, files: files.clone(), page, op_state: StorageOpState::AwaitingMkdir, prompt_msg_id: Some(prompt.id), pending_delete_path: pending_delete_path.clone()
                 });
             } else if data == "st_upload" {
                 let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback("❌ 取消", "st_op_cancel")]]);
@@ -1288,8 +1387,9 @@ async fn callback_handler(
                     .reply_markup(keyboard)
                     .await?;
 
+                let mut states = ctx.user_states.lock().await;
                 states.insert(chat_id, UserState::StorageBrowse {
-                    storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id: *browse_msg_id, files: files.clone(), page: *page, op_state: StorageOpState::AwaitingUpload, prompt_msg_id: Some(prompt.id), pending_delete_path: pending_delete_path.clone()
+                    storage_id: storage_id.clone(), root_path: root_path.clone(), current_path: current_path.clone(), browse_msg_id, files: files.clone(), page, op_state: StorageOpState::AwaitingUpload, prompt_msg_id: Some(prompt.id), pending_delete_path: pending_delete_path.clone()
                 });
             }
         }
@@ -1297,10 +1397,12 @@ async fn callback_handler(
 
     // Offline Download Interactive callbacks (od_tool_, od_confirm_path, od_confirm, od_cancel, od_cd_)
     if data.starts_with("od_tool_") || data == "od_confirm_path" || data == "od_confirm" || data == "od_cancel" || data.starts_with("od_cd_") {
-        let mut states = ctx.user_states.lock().await;
-        let mut state = states.get(&chat_id).cloned();
+        let state = {
+            let states = ctx.user_states.lock().await;
+            states.get(&chat_id).cloned()
+        };
 
-        if let Some(UserState::OfflineDownload { step: _, message_id, tool, path, urls }) = &mut state {
+        if let Some(UserState::OfflineDownload { step: _, message_id, tool, path, urls }) = state {
             if data.starts_with("od_tool_") {
                 let selected_tool = data.replace("od_tool_", "");
                 // Fetch storage list
@@ -1316,13 +1418,16 @@ async fn callback_handler(
                         }
                         buttons.push(vec![InlineKeyboardButton::callback("✅ 确认选择路径", "od_confirm_path")]);
 
-                        states.insert(chat_id, UserState::OfflineDownload {
-                            step: OdStep::BrowsingPath,
-                            message_id: *message_id,
-                            tool: Some(selected_tool.clone()),
-                            path: Some("/".to_string()),
-                            urls: vec![],
-                        });
+                        {
+                            let mut states = ctx.user_states.lock().await;
+                            states.insert(chat_id, UserState::OfflineDownload {
+                                step: OdStep::BrowsingPath,
+                                message_id,
+                                tool: Some(selected_tool.clone()),
+                                path: Some("/".to_string()),
+                                urls: vec![],
+                            });
+                        }
 
                         bot.edit_message_text(chat_id, msg.id, format!("✅ 已选择工具: {}\n\n请选择存储（点击文件夹进入）:", selected_tool))
                             .reply_markup(InlineKeyboardMarkup::new(buttons))
@@ -1335,13 +1440,16 @@ async fn callback_handler(
             } else if data.starts_with("od_cd_") {
                 let path_id = data.replace("od_cd_", "");
                 if let Some(cd_path) = get_path(&ctx, &path_id).await {
-                    states.insert(chat_id, UserState::OfflineDownload {
-                        step: OdStep::BrowsingPath,
-                        message_id: *message_id,
-                        tool: tool.clone(),
-                        path: Some(cd_path.clone()),
-                        urls: vec![],
-                    });
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, UserState::OfflineDownload {
+                            step: OdStep::BrowsingPath,
+                            message_id,
+                            tool: tool.clone(),
+                            path: Some(cd_path.clone()),
+                            urls: vec![],
+                        });
+                    }
 
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
@@ -1377,21 +1485,26 @@ async fn callback_handler(
                 }
             } else if data == "od_confirm_path" {
                 let cur_path = path.clone().unwrap_or_else(|| "/".to_string());
-                states.insert(chat_id, UserState::OfflineDownload {
-                    step: OdStep::EnteringUrl,
-                    message_id: *message_id,
-                    tool: tool.clone(),
-                    path: Some(cur_path.clone()),
-                    urls: vec![],
-                });
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.insert(chat_id, UserState::OfflineDownload {
+                        step: OdStep::EnteringUrl,
+                        message_id,
+                        tool: tool.clone(),
+                        path: Some(cur_path.clone()),
+                        urls: vec![],
+                    });
+                }
                 bot.edit_message_text(chat_id, msg.id, format!("已选择路径: {}\n\n请输入下载链接 (支持 HTTP/magnet/bt):", cur_path)).await?;
             } else if data == "od_confirm" {
                 let tool_val = tool.clone().unwrap_or_else(|| "qbittorrent".to_string());
                 let path_val = path.clone().unwrap_or_else(|| "/".to_string());
                 let url_val = urls.first().cloned().unwrap_or_default();
 
-                states.remove(&chat_id);
-                drop(states);
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.remove(&chat_id);
+                }
 
                 bot.edit_message_text(chat_id, msg.id, "🔄 正在创建任务...").await?;
 
@@ -1408,24 +1521,25 @@ async fn callback_handler(
                     }
                 });
             } else if data == "od_cancel" {
-                states.remove(&chat_id);
+                {
+                    let mut states = ctx.user_states.lock().await;
+                    states.remove(&chat_id);
+                }
                 bot.edit_message_text(chat_id, msg.id, "❌ 已取消").await?;
             }
         }
         return Ok(());
     }
 
-    let clicker_user_id = query.from.id.0 as i64;
-
     if data == "od_new" {
         let _ = bot.delete_message(chat_id, msg.id).await;
-        start_od_download_flow(bot.clone(), msg.clone(), ctx.clone(), Some(clicker_user_id)).await?;
+        start_od_download_flow(bot.clone(), msg.clone(), ctx.clone(), Some(clicker_id)).await?;
         return Ok(());
     }
 
     if data == "od_status" {
         let _ = bot.delete_message(chat_id, msg.id).await;
-        handle_ods(bot.clone(), msg.clone(), ctx.clone(), 1, Some(clicker_user_id)).await?;
+        handle_ods(bot.clone(), msg.clone(), ctx.clone(), 1, Some(clicker_id)).await?;
         return Ok(());
     }
 
@@ -1439,7 +1553,7 @@ async fn callback_handler(
         if data.starts_with("ods_page_") {
             if let Ok(p) = data.replace("ods_page_", "").parse::<usize>() {
                 bot.delete_message(chat_id, msg.id).await?;
-                handle_ods(bot.clone(), msg.clone(), ctx.clone(), p, Some(clicker_user_id)).await?;
+                handle_ods(bot.clone(), msg.clone(), ctx.clone(), p, Some(clicker_id)).await?;
             }
             return Ok(());
         }
@@ -1451,8 +1565,16 @@ async fn callback_handler(
             bot.edit_message_text(chat_id, msg.id, "🔄 正在读取详情...").await?;
             
             // Search task
-            let undone = ctx.openlist.get_offline_download_undone_task().await.unwrap_or_default();
-            let done = ctx.openlist.get_offline_download_done_task().await.unwrap_or_default();
+            let (undone, done) = match tokio::try_join!(
+                ctx.openlist.get_offline_download_undone_task(),
+                ctx.openlist.get_offline_download_done_task()
+            ) {
+                Ok(tasks) => tasks,
+                Err(e) => {
+                    bot.edit_message_text(chat_id, msg.id, format!("获取任务详情失败: {}", e)).await?;
+                    return Ok(());
+                }
+            };
             
             let mut found_task = None;
             let mut is_undone = true;
@@ -1496,14 +1618,14 @@ async fn callback_handler(
                                 let raw_url = f_info.raw_url.unwrap_or_default();
                                 let web_url = ctx_clone.config.read().await.openlist.openlist_host.clone();
                                 let full_url = format!("{}/#{}", web_url.trim_end_matches('/'), target_path);
-                                format!("✅ 任务详情\n\n文件名: {}\n大小: {}\n路径: `{}`\n\n直链: {}\n📂 [点击打开下载目录]({})",
-                                         filename, size, target_path, raw_url, full_url)
+                                format!("✅ 任务详情\n\n文件名: {}\n大小: {}\n路径: `{}`\n\n直链: `{}`\n📂 [点击打开下载目录]({})",
+                                         md_escape(&filename), md_escape(&size), escape_code(&target_path), escape_code(&raw_url), escape_link_url(&full_url))
                             }
                             Err(_) => {
                                 let web_url = ctx_clone.config.read().await.openlist.openlist_host.clone();
                                 let full_url = format!("{}/#{}", web_url.trim_end_matches('/'), target_path);
                                 format!("✅ 任务详情\n\n文件名: {}\n大小: {}\n路径: `{}`\n\n📂 [点击打开下载目录]({})",
-                                         filename, size, target_path, full_url)
+                                         md_escape(&filename), md_escape(&size), escape_code(&target_path), escape_link_url(&full_url))
                             }
                         };
                         let keyboard = InlineKeyboardMarkup::new(vec![
@@ -1511,6 +1633,7 @@ async fn callback_handler(
                         ]);
                         let _ = bot_clone.edit_message_text(chat_id, msg.id, text_resp)
                             .reply_markup(keyboard)
+                            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                             .disable_web_page_preview(true)
                             .await;
                     });
@@ -1618,15 +1741,17 @@ async fn callback_handler(
                     }
                     buttons.push(vec![InlineKeyboardButton::callback("✅ 确认选择路径", "cf_confirm_path")]);
 
-                    let mut states = ctx.user_states.lock().await;
-                    states.insert(chat_id, UserState::ConfigEdit {
-                        step: CfStep::BrowsingPath,
-                        message_id: Some(msg.id),
-                        tool: Some(selected_tool.clone()),
-                        path: Some("/".to_string()),
-                        config_key: None,
-                        config_name: None,
-                    });
+                    {
+                        let mut states = ctx.user_states.lock().await;
+                        states.insert(chat_id, UserState::ConfigEdit {
+                            step: CfStep::BrowsingPath,
+                            message_id: Some(msg.id),
+                            tool: Some(selected_tool.clone()),
+                            path: Some("/".to_string()),
+                            config_key: None,
+                            config_name: None,
+                        });
+                    }
 
                     bot.edit_message_text(chat_id, msg.id, format!("✅ 已选择工具: {}\n\n请选择存储（点击文件夹进入）:", selected_tool))
                         .reply_markup(InlineKeyboardMarkup::new(buttons))
@@ -1639,18 +1764,14 @@ async fn callback_handler(
         } else if data.starts_with("cf_path_") {
             let path_id = data.replace("cf_path_", "");
             if let Some(cd_path) = get_path(&ctx, &path_id).await {
-                let mut states = ctx.user_states.lock().await;
-                if let Some(UserState::ConfigEdit { tool, .. }) = states.get_mut(&chat_id) {
-                    let cur_tool = tool.clone();
-                    states.insert(chat_id, UserState::ConfigEdit {
-                        step: CfStep::BrowsingDir,
-                        message_id: Some(msg.id),
-                        tool: cur_tool,
-                        path: Some(cd_path.clone()),
-                        config_key: None,
-                        config_name: None,
-                    });
-
+                let cur_tool = {
+                    let states = ctx.user_states.lock().await;
+                    match states.get(&chat_id) {
+                        Some(UserState::ConfigEdit { tool, .. }) => Some(tool.clone()),
+                        _ => None,
+                    }
+                };
+                if let Some(cur_tool) = cur_tool {
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
@@ -1667,6 +1788,18 @@ async fn callback_handler(
                                 let parent = parent_path(&cd_path);
                                 let parent_id = register_path(&ctx, &parent).await;
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
+                            }
+
+                            {
+                                let mut states = ctx.user_states.lock().await;
+                                states.insert(chat_id, UserState::ConfigEdit {
+                                    step: CfStep::BrowsingDir,
+                                    message_id: Some(msg.id),
+                                    tool: cur_tool,
+                                    path: Some(cd_path.clone()),
+                                    config_key: None,
+                                    config_name: None,
+                                });
                             }
 
                             let mut text = format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
@@ -1687,18 +1820,14 @@ async fn callback_handler(
         } else if data.starts_with("cf_dir_") {
             let path_id = data.replace("cf_dir_", "");
             if let Some(cd_path) = get_path(&ctx, &path_id).await {
-                let mut states = ctx.user_states.lock().await;
-                if let Some(UserState::ConfigEdit { tool, .. }) = states.get_mut(&chat_id) {
-                    let cur_tool = tool.clone();
-                    states.insert(chat_id, UserState::ConfigEdit {
-                        step: CfStep::BrowsingDir,
-                        message_id: Some(msg.id),
-                        tool: cur_tool,
-                        path: Some(cd_path.clone()),
-                        config_key: None,
-                        config_name: None,
-                    });
-
+                let cur_tool = {
+                    let states = ctx.user_states.lock().await;
+                    match states.get(&chat_id) {
+                        Some(UserState::ConfigEdit { tool, .. }) => Some(tool.clone()),
+                        _ => None,
+                    }
+                };
+                if let Some(cur_tool) = cur_tool {
                     // Browser list
                     match ctx.openlist.fs_list(&cd_path).await {
                         Ok(files) => {
@@ -1717,6 +1846,18 @@ async fn callback_handler(
                                 buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上级", format!("cf_dir_{}", parent_id))]);
                             }
 
+                            {
+                                let mut states = ctx.user_states.lock().await;
+                                states.insert(chat_id, UserState::ConfigEdit {
+                                    step: CfStep::BrowsingDir,
+                                    message_id: Some(msg.id),
+                                    tool: cur_tool,
+                                    path: Some(cd_path.clone()),
+                                    config_key: None,
+                                    config_name: None,
+                                });
+                            }
+
                             let mut text = format!("📁 选择存储路径: `{}`\n\n点击目录进入，点击确认此路径按钮完成选择", escape_code(&cd_path));
                             if dirs.len() > 10 {
                                 text.push_str(&format!("\n\n⚠️ 目录过多，仅显示前 10 个（共 {} 个）", dirs.len()));
@@ -1733,19 +1874,32 @@ async fn callback_handler(
                 }
             }
         } else if data == "cf_confirm_path" {
-            let mut states = ctx.user_states.lock().await;
-            if let Some(UserState::ConfigEdit { tool: Some(t), path: Some(p), .. }) = states.get(&chat_id).cloned() {
-                states.remove(&chat_id);
-                drop(states);
+            let confirmed = {
+                let mut states = ctx.user_states.lock().await;
+                match states.get(&chat_id).cloned() {
+                    Some(UserState::ConfigEdit { tool: Some(t), path: Some(p), .. }) => {
+                        states.remove(&chat_id);
+                        Some((t, p))
+                    }
+                    _ => None,
+                }
+            };
 
-                let mut cfg = ctx.config.write().await;
-                cfg.openlist.download_tool = t.clone();
-                cfg.openlist.download_path = p.clone();
-                
-                if let Err(e) = cfg.save() {
-                    bot.send_message(chat_id, format!("❌ 保存失败: {}", e)).await?;
-                } else {
-                    bot.edit_message_text(chat_id, msg.id, format!("✅ 配置成功！\n\n📋 当前默认配置:\n🔧 下载工具: {}\n📂 下载路径: {}", t, p)).await?;
+            if let Some((t, p)) = confirmed {
+                let save_result = {
+                    let mut cfg = ctx.config.write().await;
+                    cfg.openlist.download_tool = t.clone();
+                    cfg.openlist.download_path = p.clone();
+                    cfg.save()
+                };
+
+                match save_result {
+                    Ok(()) => {
+                        bot.edit_message_text(chat_id, msg.id, format!("✅ 配置成功！\n\n📋 当前默认配置:\n🔧 下载工具: {}\n📂 下载路径: {}", t, p)).await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(chat_id, format!("❌ 保存失败: {}", e)).await?;
+                    }
                 }
             }
         }

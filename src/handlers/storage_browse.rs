@@ -6,7 +6,7 @@ use tracing::{info, error};
 use crate::BotContext;
 use crate::api::openlist::FileItem;
 use crate::handlers::ui;
-use crate::utils::{is_admin, format_size};
+use crate::utils::{is_admin, format_size, escape_code};
 
 pub const PER_PAGE: usize = 10;
 
@@ -82,7 +82,7 @@ pub async fn build_file_list(
     let page_items = &content[start..end];
 
     let mut text = ui::title_bar("📂 浏览存储");
-    text.push_str(&format!("📁 `{}`\n", current_path));
+    text.push_str(&format!("📁 `{}`\n", escape_code(current_path)));
     text.push_str(&ui::meta_line(page, total_pages, total_items, ""));
 
     let mut buttons = Vec::new();

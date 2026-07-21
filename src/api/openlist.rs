@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use tracing::warn;
 use crate::config::Config;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -73,7 +74,10 @@ impl OpenListClient {
 
     fn headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&self.token).unwrap_or(HeaderValue::from_static("")));
+        match HeaderValue::from_str(&self.token) {
+            Ok(val) => { headers.insert(AUTHORIZATION, val); }
+            Err(_) => warn!("OpenList token contains invalid characters; Authorization header left empty"),
+        }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert("User-Agent", HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36"));
         headers

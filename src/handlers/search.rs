@@ -30,11 +30,18 @@ impl PanSouPage {
         }
     }
 
+    fn filtered_indexed(&self) -> Vec<(usize, PanSouResult)> {
+        self.all_results.iter().enumerate()
+            .filter(|(_, r)| match &self.filter_type {
+                Some(t) => &r.pan_type == t,
+                None => true,
+            })
+            .map(|(i, r)| (i, r.clone()))
+            .collect()
+    }
+
     pub fn filtered_results(&self) -> Vec<PanSouResult> {
-        match &self.filter_type {
-            Some(t) => self.all_results.iter().filter(|r| &r.pan_type == t).cloned().collect(),
-            None => self.all_results.clone(),
-        }
+        self.filtered_indexed().into_iter().map(|(_, r)| r).collect()
     }
 
     pub fn page_count(&self) -> usize {
@@ -123,7 +130,7 @@ impl PanSouPage {
     }
 
     pub fn btn(&self) -> InlineKeyboardMarkup {
-        let filtered = self.filtered_results();
+        let filtered = self.filtered_indexed();
         let total = filtered.len();
         let start = self.index * PER_PAGE;
         let end = (start + PER_PAGE).min(total);
@@ -133,7 +140,7 @@ impl PanSouPage {
 
         // 1. Action buttons for items on the current page
         let mut web_buttons = Vec::new();
-        for (i, item) in items.iter().enumerate() {
+        for (i, (global_idx, item)) in items.iter().enumerate() {
             let count = start + i + 1;
             
             let source_name = match item.pan_type.as_str() {
@@ -152,18 +159,16 @@ impl PanSouPage {
             };
 
             if (item.pan_type == "magnet" || item.pan_type == "ed2k") && !item.url.is_empty() {
-                if let Some(global_idx) = self.all_results.iter().position(|r| r.url == item.url) {
-                    keyboard.push(vec![
-                        InlineKeyboardButton::callback(
-                            format!("📥 #{} 下载", count),
-                            format!("s_dl_{}_{}", self.cmid, global_idx),
-                        ),
-                        InlineKeyboardButton::callback(
-                            format!("📋 #{} 复制", count),
-                            format!("s_cp_{}_{}", self.cmid, global_idx),
-                        )
-                    ]);
-                }
+                keyboard.push(vec![
+                    InlineKeyboardButton::callback(
+                        format!("📥 #{} 下载", count),
+                        format!("s_dl_{}_{}", self.cmid, global_idx),
+                    ),
+                    InlineKeyboardButton::callback(
+                        format!("📋 #{} 复制", count),
+                        format!("s_cp_{}_{}", self.cmid, global_idx),
+                    )
+                ]);
             } else if !item.url.is_empty() {
                 if let Ok(url) = url::Url::parse(&item.url) {
                     web_buttons.push(InlineKeyboardButton::url(
