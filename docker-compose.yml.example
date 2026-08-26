@@ -13,8 +13,8 @@ services:
     #   dockerfile: Dockerfile
 
     volumes:
-      # 挂载机器人配置文件（只读模式）
-      - ./config.yaml:/app/config.yaml:ro
+      # 配置管理功能需要写回此文件，因此必须以读写模式挂载
+      - ./config.yaml:/app/config.yaml
       
       # 挂载数据目录，持久化保存种子缓存和内部数据状态
       - ./data:/app/data

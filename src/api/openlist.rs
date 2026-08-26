@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use tracing::warn;
 use crate::config::Config;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct OpenListAPIResponse<T> {
@@ -75,8 +75,12 @@ impl OpenListClient {
     fn headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
         match HeaderValue::from_str(&self.token) {
-            Ok(val) => { headers.insert(AUTHORIZATION, val); }
-            Err(_) => warn!("OpenList token contains invalid characters; Authorization header left empty"),
+            Ok(val) => {
+                headers.insert(AUTHORIZATION, val);
+            }
+            Err(_) => {
+                warn!("OpenList token contains invalid characters; Authorization header left empty")
+            }
         }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert("User-Agent", HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36"));
@@ -84,32 +88,35 @@ impl OpenListClient {
     }
 
     pub async fn login(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Just verify connection by hitting /api/public/offline_download_tools
-        let url = format!("{}/api/public/offline_download_tools", self.host.trim_end_matches('/'));
-        let res = self.client.get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
-        if !res.status().is_success() {
-            return Err(format!("Login check failed with status: {}", res.status()).into());
-        }
-        Ok(())
+        // This admin endpoint both verifies connectivity and proves that the
+        // configured token is accepted. Public endpoints cannot authenticate.
+        self.storage_list().await.map(|_| ())
     }
 
     /// List a directory without forcing OpenList to re-index the backend.
     /// Use this for interactive browsing so每次点目录不会把 115/阿里云等云盘
     /// 全量刷新一遍（慢且易触发风控）。
-    pub async fn fs_list(&self, path: &str) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_list(
+        &self,
+        path: &str,
+    ) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
         self.fs_list_inner(path, false).await
     }
 
     /// List a directory and force OpenList to refresh its cache for that path.
     /// Only the explicit `/refresh` command should need this.
-    pub async fn fs_list_refresh(&self, path: &str) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_list_refresh(
+        &self,
+        path: &str,
+    ) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
         self.fs_list_inner(path, true).await
     }
 
-    async fn fs_list_inner(&self, path: &str, refresh: bool) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn fs_list_inner(
+        &self,
+        path: &str,
+        refresh: bool,
+    ) -> Result<Vec<FileItem>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/list", self.host.trim_end_matches('/'));
         let body = serde_json::json!({
             "path": path,
@@ -117,13 +124,15 @@ impl OpenListClient {
             "per_page": 0,
             "refresh": refresh
         });
-        
-        let res = self.client.post(&url)
+
+        let res = self
+            .client
+            .post(&url)
             .headers(self.headers())
             .json(&body)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -152,16 +161,21 @@ impl OpenListClient {
         Ok(vec![])
     }
 
-    pub async fn fs_get(&self, path: &str) -> Result<FileInfo, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_get(
+        &self,
+        path: &str,
+    ) -> Result<FileInfo, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/get", self.host.trim_end_matches('/'));
         let body = serde_json::json!({ "path": path });
-        
-        let res = self.client.post(&url)
+
+        let res = self
+            .client
+            .post(&url)
             .headers(self.headers())
             .json(&body)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -172,18 +186,17 @@ impl OpenListClient {
         if resp.code != 200 {
             return Err(format!("fs_get API error: {}", resp.message).into());
         }
-        
+
         resp.data.ok_or_else(|| "No file info in response".into())
     }
 
-    pub async fn storage_list(&self) -> Result<Vec<StorageInfo>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn storage_list(
+        &self,
+    ) -> Result<Vec<StorageInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/admin/storage/list", self.host.trim_end_matches('/'));
-        
-        let res = self.client.get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
-            
+
+        let res = self.client.get(&url).headers(self.headers()).send().await?;
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -210,43 +223,59 @@ impl OpenListClient {
         Ok(vec![])
     }
 
-    pub async fn get_offline_download_tools(&self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/api/public/offline_download_tools", self.host.trim_end_matches('/'));
-        
-        let res = self.client.get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
-            
+    pub async fn get_offline_download_tools(
+        &self,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "{}/api/public/offline_download_tools",
+            self.host.trim_end_matches('/')
+        );
+
+        let res = self.client.get(&url).headers(self.headers()).send().await?;
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
-            return Err(format!("get_offline_download_tools failed: {}, body: {}", status, text).into());
+            return Err(format!(
+                "get_offline_download_tools failed: {}, body: {}",
+                status, text
+            )
+            .into());
         }
 
         let resp: OpenListAPIResponse<Vec<String>> = serde_json::from_str(&text)?;
         if resp.code != 200 {
             return Err(format!("get_offline_download_tools API error: {}", resp.message).into());
         }
-        
+
         Ok(resp.data.unwrap_or_default())
     }
 
-    pub async fn add_offline_download(&self, urls: Vec<String>, tool: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/api/fs/add_offline_download", self.host.trim_end_matches('/'));
+    pub async fn add_offline_download(
+        &self,
+        urls: Vec<String>,
+        tool: &str,
+        path: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "{}/api/fs/add_offline_download",
+            self.host.trim_end_matches('/')
+        );
         let body = serde_json::json!({
             "urls": urls,
             "tool": tool,
             "path": path,
             "delete_policy": "0"
         });
-        
-        let res = self.client.post(&url)
+
+        let res = self
+            .client
+            .post(&url)
             .headers(self.headers())
             .json(&body)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -257,67 +286,91 @@ impl OpenListClient {
         if resp.code != 200 {
             return Err(format!("add_offline_download API error: {}", resp.message).into());
         }
-        
+
         Ok(())
     }
 
-    pub async fn get_offline_download_undone_task(&self) -> Result<Vec<TaskInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/api/admin/task/offline_download/undone", self.host.trim_end_matches('/'));
-        
-        let res = self.client.get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
-            
+    pub async fn get_offline_download_undone_task(
+        &self,
+    ) -> Result<Vec<TaskInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "{}/api/admin/task/offline_download/undone",
+            self.host.trim_end_matches('/')
+        );
+
+        let res = self.client.get(&url).headers(self.headers()).send().await?;
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
-            return Err(format!("get_offline_download_undone_task failed: {}, body: {}", status, text).into());
+            return Err(format!(
+                "get_offline_download_undone_task failed: {}, body: {}",
+                status, text
+            )
+            .into());
         }
 
         let resp: OpenListAPIResponse<Vec<TaskInfo>> = serde_json::from_str(&text)?;
         if resp.code != 200 {
-            return Err(format!("get_offline_download_undone_task API error: {}", resp.message).into());
+            return Err(format!(
+                "get_offline_download_undone_task API error: {}",
+                resp.message
+            )
+            .into());
         }
-        
+
         Ok(resp.data.unwrap_or_default())
     }
 
-    pub async fn get_offline_download_done_task(&self) -> Result<Vec<TaskInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/api/admin/task/offline_download/done", self.host.trim_end_matches('/'));
-        
-        let res = self.client.get(&url)
-            .headers(self.headers())
-            .send()
-            .await?;
-            
+    pub async fn get_offline_download_done_task(
+        &self,
+    ) -> Result<Vec<TaskInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!(
+            "{}/api/admin/task/offline_download/done",
+            self.host.trim_end_matches('/')
+        );
+
+        let res = self.client.get(&url).headers(self.headers()).send().await?;
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
-            return Err(format!("get_offline_download_done_task failed: {}, body: {}", status, text).into());
+            return Err(format!(
+                "get_offline_download_done_task failed: {}, body: {}",
+                status, text
+            )
+            .into());
         }
 
         let resp: OpenListAPIResponse<Vec<TaskInfo>> = serde_json::from_str(&text)?;
         if resp.code != 200 {
-            return Err(format!("get_offline_download_done_task API error: {}", resp.message).into());
+            return Err(
+                format!("get_offline_download_done_task API error: {}", resp.message).into(),
+            );
         }
-        
+
         Ok(resp.data.unwrap_or_default())
     }
 
-    pub async fn fs_remove(&self, dir_path: &str, names: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_remove(
+        &self,
+        dir_path: &str,
+        names: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/remove", self.host.trim_end_matches('/'));
         let body = serde_json::json!({
             "dir": dir_path,
             "names": names
         });
-        
-        let res = self.client.post(&url)
+
+        let res = self
+            .client
+            .post(&url)
             .headers(self.headers())
             .json(&body)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -328,20 +381,25 @@ impl OpenListClient {
         if resp.code != 200 {
             return Err(format!("fs_remove API error: {}", resp.message).into());
         }
-        
+
         Ok(())
     }
 
-    pub async fn fs_mkdir(&self, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_mkdir(
+        &self,
+        path: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/mkdir", self.host.trim_end_matches('/'));
         let body = serde_json::json!({ "path": path });
-        
-        let res = self.client.post(&url)
+
+        let res = self
+            .client
+            .post(&url)
             .headers(self.headers())
             .json(&body)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -352,28 +410,46 @@ impl OpenListClient {
         if resp.code != 200 {
             return Err(format!("fs_mkdir API error: {}", resp.message).into());
         }
-        
+
         Ok(())
     }
 
-    pub async fn fs_put_bytes(&self, bytes: Vec<u8>, remote_path: &str, file_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fs_put_bytes(
+        &self,
+        bytes: Vec<u8>,
+        remote_path: &str,
+        file_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/fs/put", self.host.trim_end_matches('/'));
-        
-        let remote_full_path = format!("{}/{}", remote_path.trim_end_matches('/'), file_name.trim_start_matches('/'));
-        let encoded_path = percent_encoding::utf8_percent_encode(&remote_full_path, percent_encoding::NON_ALPHANUMERIC).to_string();
-        
+
+        let remote_full_path = format!(
+            "{}/{}",
+            remote_path.trim_end_matches('/'),
+            file_name.trim_start_matches('/')
+        );
+        let encoded_path = percent_encoding::utf8_percent_encode(
+            &remote_full_path,
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string();
+
         let mut headers = self.headers();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
         headers.insert("As-Task", HeaderValue::from_static("false"));
         headers.insert("File-Path", HeaderValue::from_str(&encoded_path)?);
         // Content-Length is set automatically by reqwest from the body.
 
-        let res = self.client.put(&url)
+        let res = self
+            .client
+            .put(&url)
             .headers(headers)
             .body(bytes)
             .send()
             .await?;
-            
+
         let status = res.status();
         let text = res.text().await?;
         if !status.is_success() {
@@ -384,7 +460,71 @@ impl OpenListClient {
         if resp.code != 200 {
             return Err(format!("fs_put_bytes API error: {}", resp.message).into());
         }
-        
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{OpenListConfig, SearchConfig, UserConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn client_with_response(body: &'static str) -> OpenListClient {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            let bytes_read = socket.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..bytes_read]);
+            assert!(request.starts_with("GET /api/admin/storage/list "));
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("authorization: token"));
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let config = Config {
+            log_level: "INFO".into(),
+            user: UserConfig {
+                admin: 1,
+                bot_token: "telegram".into(),
+                member: vec![],
+            },
+            openlist: OpenListConfig {
+                openlist_host: format!("http://{}", address),
+                openlist_token: "token".into(),
+                download_path: "/".into(),
+                download_tool: "tool".into(),
+            },
+            pansou: None,
+            proxy: None,
+            search: SearchConfig::default(),
+        };
+        OpenListClient::new(&config, reqwest::Client::new())
+    }
+
+    #[tokio::test]
+    async fn login_rejects_api_level_authentication_error() {
+        let client =
+            client_with_response(r#"{"code":401,"message":"unauthorized","data":null}"#).await;
+        let error = client.login().await.unwrap_err().to_string();
+        assert!(error.contains("unauthorized"));
+    }
+
+    #[tokio::test]
+    async fn login_accepts_authenticated_admin_response() {
+        let client =
+            client_with_response(r#"{"code":200,"message":"success","data":{"content":[]}}"#).await;
+        client.login().await.unwrap();
     }
 }

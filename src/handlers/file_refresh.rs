@@ -2,8 +2,8 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use tracing::info;
 
-use crate::BotContext;
 use crate::utils::is_admin;
+use crate::BotContext;
 
 pub async fn handle_refresh(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> ResponseResult<()> {
     let chat_id = msg.chat.id;

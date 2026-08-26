@@ -116,9 +116,78 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.save_to(Path::new("config.yaml"))
+    }
+
+    fn save_to(&self, path: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let content = serde_yaml::to_string(self)?;
-        fs::write("config.yaml", content)?;
-        info!("Saved config to config.yaml");
+        fs::write(path, content)?;
+        info!("Saved config to {}", path.display());
         Ok(())
+    }
+
+    /// Persist a candidate configuration before publishing it to readers.
+    /// Failed writes leave the live in-memory configuration untouched.
+    pub fn update_and_save<F>(
+        &mut self,
+        update: F,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        F: FnOnce(&mut Config),
+    {
+        self.update_and_save_to(Path::new("config.yaml"), update)
+    }
+
+    fn update_and_save_to<F>(
+        &mut self,
+        path: &Path,
+        update: F,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        F: FnOnce(&mut Config),
+    {
+        let mut candidate = self.clone();
+        update(&mut candidate);
+        candidate.save_to(path)?;
+        *self = candidate;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            log_level: "INFO".into(),
+            user: UserConfig {
+                admin: 1,
+                bot_token: "token".into(),
+                member: vec![],
+            },
+            openlist: OpenListConfig {
+                openlist_host: "http://localhost".into(),
+                openlist_token: "secret".into(),
+                download_path: "/old".into(),
+                download_tool: "tool".into(),
+            },
+            pansou: None,
+            proxy: None,
+            search: SearchConfig::default(),
+        }
+    }
+
+    #[test]
+    fn failed_save_does_not_change_live_config() {
+        let mut config = test_config();
+        let invalid_path = Path::new("/definitely-missing-openlist-bot-dir/config.yaml");
+
+        let result = config.update_and_save_to(invalid_path, |candidate| {
+            candidate.openlist.download_path = "/new".into();
+        });
+
+        assert!(result.is_err());
+        assert_eq!(config.openlist.download_path, "/old");
     }
 }

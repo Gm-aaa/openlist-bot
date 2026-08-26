@@ -1,21 +1,35 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-use tracing::{info, error};
+use tracing::{error, info};
 
 use percent_encoding;
 
+use crate::utils::{format_size, is_admin};
 use crate::BotContext;
-use crate::utils::{is_admin, format_size};
-use crate::{UserState, OdStep};
+use crate::{OdStep, UserState};
 
-pub async fn handle_download(bot: Bot, msg: Message, _ctx: Arc<BotContext>) -> ResponseResult<()> {
+pub async fn handle_download(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> ResponseResult<()> {
     let chat_id = msg.chat.id;
+    let user_id = msg.from().map_or(0, |user| user.id.0 as i64);
+    let authorized = {
+        let config = ctx.config.read().await;
+        is_admin(user_id, &config)
+    };
+    if !authorized {
+        return Ok(());
+    }
 
     let keyboard = InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::callback("➕ 新建下载任务", "od_new")],
-        vec![InlineKeyboardButton::callback("📋 查看任务状态", "od_status")],
-        vec![InlineKeyboardButton::callback("⚙️ 下载设置", "cf_back_menu")],
+        vec![InlineKeyboardButton::callback(
+            "📋 查看任务状态",
+            "od_status",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "⚙️ 下载设置",
+            "cf_back_menu",
+        )],
     ]);
 
     bot.send_message(chat_id, "📥 离线下载\n\n请选择操作:")
@@ -44,7 +58,8 @@ pub async fn start_od_download_flow(
 
     if let Err(e) = ctx.openlist.login().await {
         error!("OpenList login failed: {}", e);
-        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e)).await?;
+        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e))
+            .await?;
         return Ok(());
     }
 
@@ -61,24 +76,32 @@ pub async fn start_od_download_flow(
                 // unusually long/unicode tool name can't blow Telegram's 64-byte
                 // callback_data limit (same class of bug as raw mount paths).
                 let tool_id = crate::register_path(&ctx, &tool).await;
-                buttons.push(vec![InlineKeyboardButton::callback(tool.clone(), format!("od_tool_{}", tool_id))]);
+                buttons.push(vec![InlineKeyboardButton::callback(
+                    tool.clone(),
+                    format!("od_tool_{}", tool_id),
+                )]);
             }
 
-            let reply = bot.send_message(chat_id, "请选择下载工具:")
+            let reply = bot
+                .send_message(chat_id, "请选择下载工具:")
                 .reply_markup(InlineKeyboardMarkup::new(buttons))
                 .await?;
 
             let mut states = ctx.user_states.lock().await;
-            states.insert(chat_id, UserState::OfflineDownload {
-                step: OdStep::SelectingTool,
-                message_id: Some(reply.id),
-                tool: None,
-                path: None,
-                urls: Vec::new(),
-            });
+            states.insert(
+                (chat_id, user_id),
+                UserState::OfflineDownload {
+                    step: OdStep::SelectingTool,
+                    message_id: Some(reply.id),
+                    tool: None,
+                    path: None,
+                    urls: Vec::new(),
+                },
+            );
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("获取下载工具失败: {}", e)).await?;
+            bot.send_message(chat_id, format!("获取下载工具失败: {}", e))
+                .await?;
         }
     }
 
@@ -137,14 +160,16 @@ pub async fn handle_ods(
 
     if let Err(e) = ctx.openlist.login().await {
         error!("OpenList login failed: {}", e);
-        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e)).await?;
+        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e))
+            .await?;
         return Ok(());
     }
 
     let undone = match ctx.openlist.get_offline_download_undone_task().await {
         Ok(t) => t,
         Err(e) => {
-            bot.send_message(chat_id, format!("获取未完成任务失败: {}", e)).await?;
+            bot.send_message(chat_id, format!("获取未完成任务失败: {}", e))
+                .await?;
             return Ok(());
         }
     };
@@ -152,7 +177,8 @@ pub async fn handle_ods(
     let done = match ctx.openlist.get_offline_download_done_task().await {
         Ok(t) => t,
         Err(e) => {
-            bot.send_message(chat_id, format!("获取已完成任务失败: {}", e)).await?;
+            bot.send_message(chat_id, format!("获取已完成任务失败: {}", e))
+                .await?;
             return Ok(());
         }
     };
@@ -185,7 +211,10 @@ pub async fn handle_ods(
     text.push_str(&format!("⏳ 进行中: {} 个\n", undone_count));
     text.push_str(&format!("✅ 已完成: {} 个\n", done_count));
     text.push_str("━━━━━━━━━━━━━━━━━━\n");
-    text.push_str(&format!("共 {} 个任务 (第 {}/{} 页)\n\n", total, page, total_pages));
+    text.push_str(&format!(
+        "共 {} 个任务 (第 {}/{} 页)\n\n",
+        total, page, total_pages
+    ));
 
     let mut buttons = Vec::new();
     for task in page_tasks {
@@ -204,16 +233,25 @@ pub async fn handle_ods(
             btn_text
         };
 
-        buttons.push(vec![InlineKeyboardButton::callback(short_btn_text, format!("ods_detail_{}", task.id))]);
+        buttons.push(vec![InlineKeyboardButton::callback(
+            short_btn_text,
+            format!("ods_detail_{}", task.id),
+        )]);
     }
 
     // Pagination
     let mut page_buttons = Vec::new();
     if page > 1 {
-        page_buttons.push(InlineKeyboardButton::callback("⬅️ 上一页", format!("ods_page_{}", page - 1)));
+        page_buttons.push(InlineKeyboardButton::callback(
+            "⬅️ 上一页",
+            format!("ods_page_{}", page - 1),
+        ));
     }
     if page < total_pages {
-        page_buttons.push(InlineKeyboardButton::callback("➡️ 下一页", format!("ods_page_{}", page + 1)));
+        page_buttons.push(InlineKeyboardButton::callback(
+            "➡️ 下一页",
+            format!("ods_page_{}", page + 1),
+        ));
     }
     if !page_buttons.is_empty() {
         buttons.push(page_buttons);
@@ -230,7 +268,7 @@ pub async fn handle_ods(
 pub async fn start_background_notifier(bot: Bot, ctx: Arc<BotContext>) {
     info!("Starting background task monitor loop");
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-    
+
     // First run initialization flag
     let mut initialized = false;
 
@@ -251,15 +289,16 @@ pub async fn start_background_notifier(bot: Bot, ctx: Arc<BotContext>) {
                 let mut done_ids = ctx.od_done_ids.lock().await;
 
                 // Gather current completed IDs
-                let current_done_ids: std::collections::HashSet<String> = done_tasks
-                    .iter()
-                    .map(|t| t.id.clone())
-                    .collect();
+                let current_done_ids: std::collections::HashSet<String> =
+                    done_tasks.iter().map(|t| t.id.clone()).collect();
 
                 if !initialized {
                     *done_ids = current_done_ids;
                     initialized = true;
-                    info!("Completed task monitor initialized with {} existing items", done_ids.len());
+                    info!(
+                        "Completed task monitor initialized with {} existing items",
+                        done_ids.len()
+                    );
                     continue;
                 }
 
@@ -274,15 +313,27 @@ pub async fn start_background_notifier(bot: Bot, ctx: Arc<BotContext>) {
                     let size = format_size(task.total_bytes);
                     let msg = if let Some(err) = &task.error {
                         if !err.is_empty() {
-                            format!("❌ 下载失败\n\n文件: {}\n路径: {}\n错误: {}", name, path, err)
+                            format!(
+                                "❌ 下载失败\n\n文件: {}\n路径: {}\n错误: {}",
+                                name, path, err
+                            )
                         } else {
-                            format!("✅ 下载完成\n\n文件: {}\n大小: {}\n路径: {}", name, size, path)
+                            format!(
+                                "✅ 下载完成\n\n文件: {}\n大小: {}\n路径: {}",
+                                name, size, path
+                            )
                         }
                     } else {
-                        format!("✅ 下载完成\n\n文件: {}\n大小: {}\n路径: {}", name, size, path)
+                        format!(
+                            "✅ 下载完成\n\n文件: {}\n大小: {}\n路径: {}",
+                            name, size, path
+                        )
                     };
 
-                    info!("Sending download task completion notification for task: {}", task.id);
+                    info!(
+                        "Sending download task completion notification for task: {}",
+                        task.id
+                    );
                     if let Err(e) = bot.send_message(ChatId(admin_id), msg).await {
                         error!("Failed to send completion notification to admin: {}", e);
                     }

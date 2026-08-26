@@ -3,10 +3,10 @@ use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use tracing::info;
 
-use crate::BotContext;
 use crate::api::pansou::PanSouResult;
 use crate::handlers::ui;
-use crate::utils::{is_member, md_escape, escape_link_url};
+use crate::utils::{escape_link_url, is_member, md_escape};
+use crate::BotContext;
 
 const PER_PAGE: usize = 5;
 
@@ -31,7 +31,9 @@ impl PanSouPage {
     }
 
     fn filtered_indexed(&self) -> Vec<(usize, PanSouResult)> {
-        self.all_results.iter().enumerate()
+        self.all_results
+            .iter()
+            .enumerate()
             .filter(|(_, r)| match &self.filter_type {
                 Some(t) => &r.pan_type == t,
                 None => true,
@@ -41,7 +43,10 @@ impl PanSouPage {
     }
 
     pub fn filtered_results(&self) -> Vec<PanSouResult> {
-        self.filtered_indexed().into_iter().map(|(_, r)| r).collect()
+        self.filtered_indexed()
+            .into_iter()
+            .map(|(_, r)| r)
+            .collect()
     }
 
     pub fn page_count(&self) -> usize {
@@ -99,7 +104,11 @@ impl PanSouPage {
             // Format list item using bold/hyperlinks
             text.push_str(&format!("{}\\. {} ", index, icon));
             if !is_magnet && !clean_url.is_empty() {
-                text.push_str(&format!("[*{}*]({})\n", name_escaped, escape_link_url(clean_url)));
+                text.push_str(&format!(
+                    "[*{}*]({})\n",
+                    name_escaped,
+                    escape_link_url(clean_url)
+                ));
             } else {
                 text.push_str(&format!("*{}*\n", name_escaped));
             }
@@ -122,7 +131,7 @@ impl PanSouPage {
             if !clean_detail.is_empty() {
                 text.push_str(&format!("   `{}`\n", clean_detail));
             }
-            
+
             text.push('\n');
         }
 
@@ -142,7 +151,7 @@ impl PanSouPage {
         let mut web_buttons = Vec::new();
         for (i, (global_idx, item)) in items.iter().enumerate() {
             let count = start + i + 1;
-            
+
             let source_name = match item.pan_type.as_str() {
                 "baidu" => "百度",
                 "aliyun" => "阿里",
@@ -167,7 +176,7 @@ impl PanSouPage {
                     InlineKeyboardButton::callback(
                         format!("📋 #{} 复制", count),
                         format!("s_cp_{}_{}", self.cmid, global_idx),
-                    )
+                    ),
                 ]);
             } else if !item.url.is_empty() {
                 if let Ok(url) = url::Url::parse(&item.url) {
@@ -184,20 +193,33 @@ impl PanSouPage {
         }
 
         // 2. Filter buttons
-        let mut pan_types: Vec<String> = self.all_results.iter().map(|r| r.pan_type.clone()).collect();
+        let mut pan_types: Vec<String> = self
+            .all_results
+            .iter()
+            .map(|r| r.pan_type.clone())
+            .collect();
         pan_types.sort();
         pan_types.dedup();
 
-        let mut filter_row = vec![InlineKeyboardButton::callback("🌐 全部", "search_filter_all")];
+        let mut filter_row = vec![InlineKeyboardButton::callback(
+            "🌐 全部",
+            "search_filter_all",
+        )];
         for pt in pan_types.iter().take(5) {
-            filter_row.push(InlineKeyboardButton::callback(get_pan_emoji(pt), format!("search_filter_{}", pt)));
+            filter_row.push(InlineKeyboardButton::callback(
+                get_pan_emoji(pt),
+                format!("search_filter_{}", pt),
+            ));
         }
         keyboard.push(filter_row);
 
         if pan_types.len() > 5 {
             let mut row2 = Vec::new();
             for pt in pan_types.iter().skip(5).take(5) {
-                row2.push(InlineKeyboardButton::callback(get_pan_emoji(pt), format!("search_filter_{}", pt)));
+                row2.push(InlineKeyboardButton::callback(
+                    get_pan_emoji(pt),
+                    format!("search_filter_{}", pt),
+                ));
             }
             if !row2.is_empty() {
                 keyboard.push(row2);
@@ -264,7 +286,7 @@ pub async fn build_search_config_menu(ctx: &BotContext) -> (String, InlineKeyboa
         let status_emoji = if is_enabled { "✅" } else { "❌" };
         let label = format!("{} {}", status_emoji, name);
         let callback = format!("cfg_src_toggle_{}", key);
-        
+
         row.push(InlineKeyboardButton::callback(label, callback));
         if row.len() == 2 {
             buttons.push(row.clone());
@@ -275,13 +297,24 @@ pub async fn build_search_config_menu(ctx: &BotContext) -> (String, InlineKeyboa
         buttons.push(row);
     }
 
-    buttons.push(vec![InlineKeyboardButton::callback("🔍 开始搜索资源", "cfg_src_start_search")]);
-    buttons.push(vec![InlineKeyboardButton::callback("❌ 关闭", "cfg_src_close")]);
+    buttons.push(vec![InlineKeyboardButton::callback(
+        "🔍 开始搜索资源",
+        "cfg_src_start_search",
+    )]);
+    buttons.push(vec![InlineKeyboardButton::callback(
+        "❌ 关闭",
+        "cfg_src_close",
+    )]);
 
     (text, InlineKeyboardMarkup::new(buttons))
 }
 
-pub async fn handle_s(bot: Bot, msg: Message, query: String, ctx: Arc<BotContext>) -> ResponseResult<()> {
+pub async fn handle_s(
+    bot: Bot,
+    msg: Message,
+    query: String,
+    ctx: Arc<BotContext>,
+) -> ResponseResult<()> {
     handle_s_with_edit(bot, msg, query, ctx, None).await
 }
 
@@ -318,7 +351,8 @@ pub async fn handle_s_with_edit(
     }
 
     let search_msg = if let Some(mid) = edit_msg_id {
-        bot.edit_message_text(chat_id, mid, "⏳ 正在搜索中...").await?
+        bot.edit_message_text(chat_id, mid, "⏳ 正在搜索中...")
+            .await?
     } else {
         bot.send_message(chat_id, "⏳ 正在搜索中...").await?
     };
@@ -366,39 +400,44 @@ pub async fn handle_s_with_edit(
     }
 
     if filtered_results.is_empty() {
-        bot.edit_message_text(chat_id, search_msg.id, "未搜索到包含已启用源的资源，请换个关键词或启用更多结果源").await?;
+        bot.edit_message_text(
+            chat_id,
+            search_msg.id,
+            "未搜索到包含已启用源的资源，请换个关键词或启用更多结果源",
+        )
+        .await?;
         return Ok(());
     }
 
-            let cmid = format!("{}|{}", chat_id, search_msg.id);
-            
-            // Populate caches
-            {
-                let mut results_cache = ctx.pansou_results.lock().await;
-                // Delete old caches for this cmid
-                results_cache.retain(|k, _| !k.starts_with(&format!("{}_", cmid)));
-                for (i, item) in filtered_results.iter().enumerate() {
-                    results_cache.insert(format!("{}_{}", cmid, i), item.clone());
-                }
-            }
+    let cmid = format!("{}|{}", chat_id, search_msg.id);
 
-            let page = PanSouPage::new(filtered_results, query, cmid.clone());
-            let text = page.get_text_with_info();
-            let keyboard = page.btn();
+    // Populate caches
+    {
+        let mut results_cache = ctx.pansou_results.lock().await;
+        // Delete old caches for this cmid
+        results_cache.retain(|k, _| !k.starts_with(&format!("{}_", cmid)));
+        for (i, item) in filtered_results.iter().enumerate() {
+            results_cache.insert(format!("{}_{}", cmid, i), item.clone());
+        }
+    }
 
-            {
-                let mut pages_cache = ctx.pansou_pages.lock().await;
-                pages_cache.insert(cmid.clone(), page);
-            }
+    let page = PanSouPage::new(filtered_results, query, cmid.clone());
+    let text = page.get_text_with_info();
+    let keyboard = page.btn();
 
-            // Keep the PanSou caches bounded across many searches.
-            crate::remember_pansou_session(&ctx, &cmid).await;
+    {
+        let mut pages_cache = ctx.pansou_pages.lock().await;
+        pages_cache.insert(cmid.clone(), page);
+    }
 
-            bot.edit_message_text(chat_id, search_msg.id, text)
-                .reply_markup(keyboard)
-                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                .disable_web_page_preview(true)
-                .await?;
-            
-            Ok(())
+    // Keep the PanSou caches bounded across many searches.
+    crate::remember_pansou_session(&ctx, &cmid).await;
+
+    bot.edit_message_text(chat_id, search_msg.id, text)
+        .reply_markup(keyboard)
+        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+        .disable_web_page_preview(true)
+        .await?;
+
+    Ok(())
 }

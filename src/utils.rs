@@ -3,7 +3,26 @@ use crate::config::Config;
 pub fn md_escape(text: &str) -> String {
     let mut escaped = String::new();
     for c in text.chars() {
-        if matches!(c, '_' | '*' | '[' | ']' | '(' | ')' | '~' | '`' | '>' | '#' | '+' | '-' | '=' | '|' | '{' | '}' | '.' | '!') {
+        if matches!(
+            c,
+            '_' | '*'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '~'
+                | '`'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '='
+                | '|'
+                | '{'
+                | '}'
+                | '.'
+                | '!'
+        ) {
             escaped.push('\\');
         }
         escaped.push(c);
@@ -48,6 +67,25 @@ pub fn path_is_within(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{}/", root))
 }
 
+/// Return true when `path` is an immediate child of `current` and both stay
+/// inside the selected storage root. This rejects callbacks left over from a
+/// different directory or storage session.
+pub fn path_is_direct_child(path: &str, current: &str, root: &str) -> bool {
+    let current = current.trim_end_matches('/');
+    let current = if current.is_empty() { "/" } else { current };
+    path_is_within(path, root) && parent_path(path) == current
+}
+
+/// Validate a single path component supplied by a user.
+pub fn is_valid_path_component(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
+}
+
 pub fn format_size(size: i64) -> String {
     let size_f = size as f64;
     let units = ["B", "KB", "MB", "GB", "TB", "PB"];
@@ -83,4 +121,29 @@ pub fn is_member(chat_id: i64, user_id: i64, config: &Config) -> bool {
         return true;
     }
     config.user.member.contains(&chat_id) || config.user.member.contains(&user_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_child_must_belong_to_current_storage_directory() {
+        assert!(path_is_direct_child("/disk/a/file", "/disk/a", "/disk"));
+        assert!(!path_is_direct_child("/other/file", "/disk/a", "/disk"));
+        assert!(!path_is_direct_child("/disk/b/file", "/disk/a", "/disk"));
+        assert!(!path_is_direct_child(
+            "/disk/a/nested/file",
+            "/disk/a",
+            "/disk"
+        ));
+    }
+
+    #[test]
+    fn user_supplied_directory_name_is_one_component() {
+        assert!(is_valid_path_component("新目录"));
+        for invalid in ["", ".", "..", "a/b", "a\\b", "bad\0name"] {
+            assert!(!is_valid_path_component(invalid), "accepted {invalid:?}");
+        }
+    }
 }

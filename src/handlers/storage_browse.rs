@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::BotContext;
 use crate::api::openlist::FileItem;
 use crate::handlers::ui;
-use crate::utils::{is_admin, format_size, escape_code};
+use crate::utils::{escape_code, format_size, is_admin};
+use crate::BotContext;
 
 pub const PER_PAGE: usize = 10;
 
@@ -25,7 +25,8 @@ pub async fn handle_st(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> Response
     info!("st_command invoked");
     if let Err(e) = ctx.openlist.login().await {
         error!("OpenList login failed: {}", e);
-        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e)).await?;
+        bot.send_message(chat_id, format!("登录 OpenList 失败: {}", e))
+            .await?;
         return Ok(());
     }
 
@@ -60,7 +61,8 @@ pub async fn handle_st(bot: Bot, msg: Message, ctx: Arc<BotContext>) -> Response
                 .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("获取存储列表失败: {}", e)).await?;
+            bot.send_message(chat_id, format!("获取存储列表失败: {}", e))
+                .await?;
         }
     }
 
@@ -74,7 +76,11 @@ pub async fn build_file_list(
     page: usize,
 ) -> (String, InlineKeyboardMarkup) {
     let total_items = content.len();
-    let total_pages = if total_items == 0 { 1 } else { total_items.div_ceil(PER_PAGE) };
+    let total_pages = if total_items == 0 {
+        1
+    } else {
+        total_items.div_ceil(PER_PAGE)
+    };
     let page = page.clamp(1, total_pages);
 
     let start = (page - 1) * PER_PAGE;
@@ -120,7 +126,10 @@ pub async fn build_file_list(
     ]);
 
     if current_path != "/" && !current_path.is_empty() {
-        buttons.push(vec![InlineKeyboardButton::callback("⬅️ 返回上一级", "back")]);
+        buttons.push(vec![InlineKeyboardButton::callback(
+            "⬅️ 返回上一级",
+            "back",
+        )]);
     }
 
     (text, InlineKeyboardMarkup::new(buttons))
