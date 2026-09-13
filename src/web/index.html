@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f3ed" />
+    <title>OpenList · 私人工作台</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <section id="login-screen" class="login-screen">
+      <div class="login-intro">
+        <span class="wordmark"
+          ><span class="brand-icon">o/</span> OPENLIST</span
+        >
+        <p class="eyebrow">YOUR FILES. ONE CONVERSATION.</p>
+        <h1>文件有去处。<br />操作有回应。</h1>
+        <p>搜索、浏览、下载。<br />你的私人文件工作台，现在可以聊着用。</p>
+        <div class="intro-footer">
+          PRIVATE WORKSPACE <span>01 — WEB EDITION</span>
+        </div>
+      </div>
+      <form id="login-form" class="login-form">
+        <span class="eyebrow">WELCOME BACK</span>
+        <h2>登录工作台</h2>
+        <p class="muted">使用配置的账号，进入你的 OpenList。</p>
+        <label
+          >用户名<input
+            name="username"
+            autocomplete="username"
+            required
+            maxlength="128" /></label
+        ><label
+          >密码<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength="1024"
+        /></label>
+        <p id="login-error" class="error" role="alert"></p>
+        <button class="primary" type="submit">进入工作台 <span>↗</span></button>
+        <p class="login-note">独立会话 · 密码保护 · 私人访问</p>
+      </form>
+    </section>
+
+    <div id="workspace" class="workspace" hidden>
+      <aside class="sidebar">
+        <a href="/" class="wordmark"
+          ><span class="brand-icon">o/</span> OPENLIST</a
+        >
+        <p class="eyebrow nav-caption">WORKSPACE / 工作区</p>
+        <nav aria-label="功能导航">
+          <button data-command="/browse"><span>▤</span> 浏览存储</button
+          ><button data-command="/search"><span>⌕</span> 搜索网盘</button
+          ><button data-command="/download"><span>↓</span> 新建下载</button
+          ><button data-command="/tasks"><span>◷</span> 下载任务</button
+          ><button data-command="/settings"><span>⚙</span> 工作台设置</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="security-note">
+            <span class="status-dot"></span
+            ><span id="security-label">密码保护已启用</span>
+          </div>
+          <button id="logout" class="quiet">退出登录 ↗</button>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">OPENLIST BOT</span>
+            <h1>私人工作台 <span class="tag">WEB</span></h1>
+          </div>
+          <button id="clear-chat" class="quiet">清空对话</button>
+        </header>
+        <div
+          id="chat"
+          class="chat"
+          role="log"
+          aria-live="polite"
+          aria-label="工作台对话"
+        >
+          <section id="welcome" class="welcome">
+            <span class="eyebrow">LET’S MAKE ROOM.</span>
+            <h2>今天，整理些什么？</h2>
+            <p>输入命令，或从下面开始。<br />文件和任务会直接出现在对话里。</p>
+            <div class="starter-grid">
+              <button data-command="/browse">
+                <span>01 / EXPLORE</span><strong>看看我的文件 ↗</strong></button
+              ><button data-command="/search">
+                <span>02 / FIND</span><strong>寻找一个资源 ↗</strong></button
+              ><button data-command="/download">
+                <span>03 / DOWNLOAD</span><strong>提交下载链接 ↗</strong>
+              </button>
+            </div>
+          </section>
+        </div>
+        <footer class="composer-area">
+          <div id="command-suggestions" class="command-suggestions" role="listbox" aria-label="命令联想" hidden></div>
+          <div id="busy" class="busy" role="status" hidden>正在处理…</div>
+          <form id="composer" class="composer">
+            <label class="sr-only" for="message">输入命令或搜索关键词</label
+            ><input
+              id="message"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="command-suggestions"
+              aria-expanded="false"
+              autocomplete="off"
+              placeholder="搜索关键词，或输入 /browse、/download…"
+              maxlength="512"
+            /><button class="send" type="submit" aria-label="发送">↑</button>
+          </form>
+          <div class="composer-hint">
+            <span>普通文字用于搜索 · /help 查看命令</span
+            ><span id="account"></span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <dialog id="operation-dialog">
+      <form id="operation-form">
+        <div class="dialog-heading">
+          <h2 id="dialog-title"></h2>
+          <button
+            type="button"
+            id="close-dialog"
+            class="quiet"
+            aria-label="关闭"
+          >
+            ✕
+          </button>
+        </div>
+        <p id="dialog-description" class="muted"></p>
+        <div id="dialog-fields"></div>
+        <label id="secondary-field" hidden
+          >二级密码<input
+            id="secondary-password"
+            type="password"
+            autocomplete="off"
+            maxlength="1024"
+          /><small>仅用于本次操作，不会保存到浏览器。</small></label
+        >
+        <p id="dialog-error" class="error" role="alert"></p>
+        <button id="dialog-submit" class="primary" type="submit">
+          确认操作 ↗
+        </button>
+      </form>
+    </dialog>
+  </body>
+</html>

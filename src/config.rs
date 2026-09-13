@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use tracing::info;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct UserConfig {
     pub admin: i64,
     pub bot_token: String,
@@ -84,12 +84,34 @@ impl Default for SearchConfig {
 pub struct Config {
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default)]
     pub user: UserConfig,
+    #[serde(default)]
+    pub web: Option<WebConfig>,
     pub openlist: OpenListConfig,
     pub pansou: Option<PanSouConfig>,
     pub proxy: Option<ProxyConfig>,
     #[serde(default)]
     pub search: SearchConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WebConfig {
+    pub username: String,
+    pub password_hash: String,
+    #[serde(default)]
+    pub secondary_password_hash: Option<String>,
+    #[serde(default = "default_web_bind")]
+    pub bind: String,
+    #[serde(default = "default_cookie_secure")]
+    pub cookie_secure: bool,
+}
+
+fn default_web_bind() -> String {
+    "127.0.0.1:8080".into()
+}
+fn default_cookie_secure() -> bool {
+    true
 }
 
 fn default_log_level() -> String {
@@ -160,6 +182,7 @@ mod tests {
 
     fn test_config() -> Config {
         Config {
+            web: None,
             log_level: "INFO".into(),
             user: UserConfig {
                 admin: 1,

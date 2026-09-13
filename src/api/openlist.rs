@@ -494,6 +494,7 @@ mod tests {
         });
 
         let config = Config {
+            web: None,
             log_level: "INFO".into(),
             user: UserConfig {
                 admin: 1,

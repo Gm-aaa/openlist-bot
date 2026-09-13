@@ -2,6 +2,7 @@ mod api;
 mod config;
 mod handlers;
 mod utils;
+mod web;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -309,7 +310,17 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if std::env::args().nth(1).as_deref() == Some("hash-password") {
+        return web::hash_password_command();
+    }
     let config = Config::load()?;
+    if let Some(web) = &config.web {
+        web::validate_config(web)?;
+    }
+    let telegram_enabled = !config.user.bot_token.trim().is_empty();
+    if !telegram_enabled && config.web.is_none() {
+        return Err("Configure web access or a Telegram bot token".into());
+    }
 
     // Logging setup
     let log_filter =
@@ -331,8 +342,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("OpenList login check successful");
     }
 
-    let bot = Bot::new(bot_token);
-
     let bot_context = Arc::new(BotContext {
         config: Arc::new(RwLock::new(config)),
         openlist,
@@ -348,6 +357,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         pansou_order: Mutex::new(VecDeque::new()),
         od_done_ids: Mutex::new(HashSet::new()),
     });
+
+    let web_server = web::start(bot_context.clone()).await?;
+    if !telegram_enabled {
+        let server = web_server.expect("web configured for web-only mode");
+        tokio::select! {
+            result = server => { result??; }
+            _ = tokio::signal::ctrl_c() => {}
+        }
+        return Ok(());
+    }
+    let bot = Bot::new(bot_token);
 
     // Register Bot commands on Telegram
     register_bot_commands(&bot).await;
@@ -396,11 +416,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     info!("Bot is listening...");
-    Dispatcher::builder(bot, handler)
+    let mut dispatcher = Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![bot_context])
-        .build()
-        .dispatch()
-        .await;
+        .build();
+    if let Some(server) = web_server {
+        tokio::select! {
+            result = server => { result??; }
+            _ = dispatcher.dispatch() => {}
+        }
+    } else {
+        dispatcher.dispatch().await;
+    }
 
     Ok(())
 }

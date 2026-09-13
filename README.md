@@ -25,6 +25,49 @@
 
 ## 部署方式
 
+### 网页聊天工作台
+
+项目内置中文网页聊天入口，支持手机和电脑，不加载外部字体、脚本或 CDN。
+可以与 Telegram 同时运行，也可以只启动网页（`user.bot_token: ""` 或省略 `user`）。
+所有网页用户使用配置的同一个管理员账号，拥有 OpenList 管理权限。
+
+支持网盘搜索、存储浏览、文件直链、新建文件夹、删除、上传（每个文件最多 16 MB，拒绝同名覆盖）、离线下载、任务状态、缓存刷新和下载/搜索源设置。
+普通文字作为搜索词，也可使用 `/search`、`/browse [路径]`、`/download`、`/tasks`、`/refresh [路径]`、`/settings`、`/help`。
+这是针对 OpenList 的命令式聊天界面，不需要大模型 API。
+
+1. 编译：`cargo build --release`。
+2. 生成登录密码哈希：`./target/release/openlist-bot hash-password`，按提示输入至少 12 字符的密码。
+3. 如需二级密码，再运行一次生成命令，使用另一组密码。
+4. 在 `config.yaml` 中添加：
+
+   ```yaml
+   web:
+     bind: "127.0.0.1:8080"
+     username: "admin"
+     password_hash: '$argon2id$...这里填写生成的完整哈希...'
+     secondary_password_hash: null # 可选：填写第二个密码的完整哈希
+     cookie_secure: true
+   ```
+
+5. 启动程序，将 HTTPS 反向代理指向 `127.0.0.1:8080`，通过代理地址登录。
+   仅本机/可信内网 HTTP 调试时，设置 `cookie_secure: false` 后访问 `http://127.0.0.1:8080`；HTTP 下启用 Secure Cookie 将无法保持登录。
+   Docker 中设置 `web.bind: "0.0.0.0:8080"` 并添加端口映射，见 Compose 示例。
+
+网页资源编译进二进制，不需要 Node.js 或单独的前端服务器。更改网页文件后需要重新编译。
+本地 Docker 构建：`docker build -t openlist-bot:web .`；镜像内生成哈希：
+`docker run --rm -it openlist-bot:web ./openlist-bot hash-password`。
+
+安全与会话行为：
+
+- 密码使用 Argon2id 哈希；会话 Cookie 为 HttpOnly、SameSite=Strict，可启用 Secure。
+- 配置二级密码后，删除、新建目录、上传、提交下载、刷新缓存和修改设置均逐次验证二级密码。
+- 每个连接来源 IP 每分钟最多 10 次登录/二级密码验证；不信任转发 IP 头。反向代理后的用户共享该代理的限额，适合私人使用。
+- 会话最长 8 小时；退出登录或重启服务后失效。账号或密码哈希修改后需重启。
+- 对话只保留在当前页面，刷新/关闭后清空。任务由 OpenList 继续执行；打开任务列表后每 30 秒更新，页面关闭后没有浏览器后台推送。
+- 管理接口仅允许同源请求；文件名和搜索结果按文本渲染，不执行上游 HTML。OpenList/PanSou Token 不发送给浏览器。
+- `config.yaml` 应只允许服务运行账号读写；网页设置会写回该文件，挂载时保留写权限。
+- 本实例的网页上传使用串行锁，并强制刷新目录后检查重名；Telegram、其他客户端或其他实例写入 OpenList 不受该锁协调，不能视为跨客户端的原子禁止覆盖保证。
+
 ### 方案一：Docker 部署（推荐）
 
 本项目支持 GitHub Packages (GHCR) 自动构建。部署前需要先获取并修改配置文件：

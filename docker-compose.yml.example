@@ -6,6 +6,11 @@ services:
     image: ghcr.io/gm-aaa/openlist-bot:latest
     container_name: openlist-bot
     restart: unless-stopped
+
+    # 启用 web 后，配置文件中的 web.bind 应为 0.0.0.0:8080。
+    # 默认仅供宿主机反向代理访问；需要直接内网访问时再调整宿主机绑定地址。
+    # ports:
+    #   - "127.0.0.1:8080:8080"
     
     # 如果您想使用本地源码构建，可以取消注释下方 build 部分并注释掉 image 字段：
     # build:

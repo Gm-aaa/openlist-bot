@@ -30,5 +30,7 @@ COPY --from=builder /app/target/release/openlist-bot .
 # 创建日志和数据目录
 RUN mkdir -p logs data/torrent_cache data/downloads
 
+EXPOSE 8080
+
 # 启动命令
 CMD ["./openlist-bot"]

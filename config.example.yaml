@@ -14,6 +14,17 @@ user:
   bot_token: "your_bot_token_here"
   member: []
 
+# 网页聊天入口（可选）。取消下面注释即可启用；删除整个 web 段可关闭。
+# 只运行网页时，将上面的 user.bot_token 设置为 ""，或者删除整个 user 段。
+# 使用 ./openlist-bot hash-password 生成哈希（交互输入，不会回显密码）。
+# 登录密码和二级密码分别生成，建议使用不同的密码。
+# web:
+#   bind: "127.0.0.1:8080"  # Docker 容器内改为 0.0.0.0:8080
+#   username: "admin"
+#   password_hash: '$argon2id$...替换为生成的完整哈希...'
+#   secondary_password_hash: null  # 可选：填写另一份哈希，保护所有写入操作
+#   cookie_secure: true  # HTTPS 使用 true；仅本机/可信内网 HTTP 调试设为 false
+
 # OpenList 配置
 openlist:
   openlist_host: "https://openlist.your-domain.com"
