@@ -24,7 +24,7 @@ axum = "0.7"
 argon2 = "0.5"
 rand = "0.8"
 rpassword = "7"
+subtle = "2.6"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-

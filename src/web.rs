@@ -46,7 +46,17 @@ pub fn validate_config(
     if config.username.trim().is_empty() {
         return Err("web.username cannot be empty".into());
     }
-    for hash in std::iter::once(&config.password_hash).chain(config.secondary_password_hash.iter())
+    if config.password.is_some() != config.password_hash.is_empty() {
+        return Err("Configure exactly one of web.password or web.password_hash".into());
+    }
+    if let Some(password) = &config.password {
+        if password.is_empty() || password.len() > 1024 {
+            return Err("web.password must contain 1–1024 bytes".into());
+        }
+    }
+    for hash in std::iter::once(&config.password_hash)
+        .filter(|hash| !hash.is_empty())
+        .chain(config.secondary_password_hash.iter())
     {
         let parsed =
             PasswordHash::new(hash).map_err(|_| "Invalid web password hash; use hash-password")?;
@@ -315,9 +325,17 @@ async fn login(
 ) -> Result<Response> {
     check_header(&headers)?;
     state.throttle(peer.ip()).await?;
-    let correct = state
-        .verify(state.config.password_hash.clone(), input.password)
-        .await?;
+    let correct = if let Some(password) = &state.config.password {
+        use subtle::ConstantTimeEq;
+        if input.password.len() > 1024 {
+            return Err(bad("密码过长"));
+        }
+        bool::from(password.as_bytes().ct_eq(input.password.as_bytes()))
+    } else {
+        state
+            .verify(state.config.password_hash.clone(), input.password)
+            .await?
+    };
     if !correct || input.username != state.config.username {
         return Err(err(StatusCode::UNAUTHORIZED, "用户名或密码错误"));
     }

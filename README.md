@@ -49,6 +49,8 @@
      cookie_secure: true
    ```
 
+   也支持明文登录密码：将 `password_hash` 替换为 `password: "your-password"`，不需要生成哈希。两项必须且只能配置一项。明文配置文件应仅允许管理员读取（例如 `chmod 600 config.yaml`）。
+
 5. 启动程序，将 HTTPS 反向代理指向 `127.0.0.1:8080`，通过代理地址登录。
    仅本机/可信内网 HTTP 调试时，设置 `cookie_secure: false` 后访问 `http://127.0.0.1:8080`；HTTP 下启用 Secure Cookie 将无法保持登录。
    Docker 中设置 `web.bind: "0.0.0.0:8080"` 并添加端口映射，见 Compose 示例。
@@ -59,10 +61,10 @@
 
 安全与会话行为：
 
-- 密码使用 Argon2id 哈希；会话 Cookie 为 HttpOnly、SameSite=Strict，可启用 Secure。
+- 登录密码支持明文 `password` 或 Argon2id `password_hash`；二级密码使用 Argon2id 哈希。会话 Cookie 为 HttpOnly、SameSite=Strict，可启用 Secure。
 - 配置二级密码后，删除、新建目录、上传、提交下载、刷新缓存和修改设置均逐次验证二级密码。
 - 每个连接来源 IP 每分钟最多 10 次登录/二级密码验证；不信任转发 IP 头。反向代理后的用户共享该代理的限额，适合私人使用。
-- 会话最长 8 小时；退出登录或重启服务后失效。账号或密码哈希修改后需重启。
+- 会话最长 8 小时；退出登录或重启服务后失效。账号或密码修改后需重启。
 - 对话只保留在当前页面，刷新/关闭后清空。任务由 OpenList 继续执行；打开任务列表后每 30 秒更新，页面关闭后没有浏览器后台推送。
 - 管理接口仅允许同源请求；文件名和搜索结果按文本渲染，不执行上游 HTML。OpenList/PanSou Token 不发送给浏览器。
 - `config.yaml` 应只允许服务运行账号读写；网页设置会写回该文件，挂载时保留写权限。

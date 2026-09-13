@@ -625,7 +625,7 @@ async function settingsDialog() {
   if (!(await loadSession()) || epoch !== dialogEpoch || !account) return;
   openOperation(
     "工作台设置",
-    "下载默认值与搜索源会保存到配置文件。账号和密码哈希在服务器的 web 配置中管理。",
+    "下载默认值与搜索源会保存到配置文件。账号和密码在服务器的 web 配置中管理。",
     [
       {
         name: "path",

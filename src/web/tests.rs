@@ -33,6 +33,7 @@ fn web_config() -> WebConfig {
     let hashes = HASHES.get_or_init(|| (hash(PASSWORD), hash(SECONDARY)));
     WebConfig {
         username: "admin".into(),
+        password: None,
         password_hash: hashes.0.clone(),
         secondary_password_hash: Some(hashes.1.clone()),
         bind: "127.0.0.1:0".into(),
@@ -504,7 +505,7 @@ async fn secondary_can_be_disabled_and_secure_cookies_are_configurable() {
 }
 
 #[test]
-fn reject_unsafe_paths_and_plaintext_config() {
+fn reject_unsafe_paths_and_invalid_password_config() {
     for path in ["", "relative", "/../a", "/a/./b", "/a\\b", "/a\nb"] {
         assert!(valid_path(path).is_err());
     }
@@ -516,6 +517,43 @@ fn reject_unsafe_paths_and_plaintext_config() {
     assert!(validate_config(&config).is_ok());
     config.password_hash = "plaintext".into();
     assert!(validate_config(&config).is_err());
+    config.password = Some(PASSWORD.into());
+    assert!(validate_config(&config).is_err());
+    config.password_hash.clear();
+    assert!(validate_config(&config).is_ok());
+    let serialized = serde_yaml::to_string(&config).unwrap();
+    assert!(!serialized
+        .lines()
+        .any(|line| line.starts_with("password_hash:")));
+    let restored: WebConfig = serde_yaml::from_str(&serialized).unwrap();
+    assert_eq!(restored.password.as_deref(), Some(PASSWORD));
+    config.password = Some(String::new());
+    assert!(validate_config(&config).is_err());
+    config.password = Some("x".repeat(1025));
+    assert!(validate_config(&config).is_err());
+    config.password = None;
+    assert!(validate_config(&config).is_err());
+}
+
+#[tokio::test]
+async fn plaintext_login_accepts_only_correct_credentials() {
+    let (mut state, _) = fixture().await;
+    let config = &mut Arc::get_mut(&mut state).unwrap().config;
+    config.password = Some(PASSWORD.into());
+    config.password_hash.clear();
+    let app = routes(state);
+    sign_in(&app).await;
+    for (username, password) in [("admin", "wrong"), ("wrong", PASSWORD)] {
+        let response = request(
+            &app,
+            "/api/login",
+            json!({"username":username,"password":password}),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }
 
 #[tokio::test]
